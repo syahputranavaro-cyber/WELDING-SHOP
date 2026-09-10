@@ -1,0 +1,6 @@
+{
+  "name": "Dashboard Welding Shop",
+  "description": "Dashboard monitor TV interaktif untuk ruang kerja Welding Shop PT Pupuk Kalimantan Timur (Pupuk Kaltim)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

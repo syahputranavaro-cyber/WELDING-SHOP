@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@layer base {
+  html, body {
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.015em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Specific Font Family Classes */
+.font-montserrat {
+  font-family: 'Montserrat', system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.05em;
+}
+
+.font-oswald {
+  font-family: 'Oswald', 'Inter', system-ui, sans-serif;
+}
+
+.font-inter {
+  font-family: 'Inter', system-ui, sans-serif;
+  letter-spacing: 0.015em;
+}
+
+/* Tabular Numbers for Date, Percentages, and Numerical Metrics */
+.tabular-nums,
+.font-tabular {
+  font-variant-numeric: tabular-nums;
+  -moz-font-feature-settings: "tnum";
+  -webkit-font-feature-settings: "tnum";
+  font-feature-settings: "tnum";
+}
+
