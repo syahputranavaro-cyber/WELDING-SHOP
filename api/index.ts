@@ -2,14 +2,29 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import {
   isSupabaseConfigured,
   fetchVersionFromSupabase,
+  loadLiteStateFromSupabase,
+  loadBrandingFromSupabase,
+  loadArchivesFromSupabase,
   loadStateFromSupabase,
   saveStateToSupabase,
+  bumpSettingsVersionInSupabase,
+  upsertSingleJobInSupabase,
+  archiveSingleJobInSupabase,
+  restoreSingleJobInSupabase,
+  deleteSingleArchiveInSupabase,
+  syncJobsToSupabase,
+  syncArchivesToSupabase,
   type PersistedServerState,
+  type LiteServerState,
 } from '../src/lib/supabaseStore.js';
 import {
   verifyAdminCredentials,
   createAdminToken,
   verifyAdminAuthHeader,
+  extractClientIp,
+  checkLoginRateLimit,
+  recordLoginFailure,
+  clearLoginFailures,
 } from '../src/lib/serverAuth.js';
 
 interface VercelRequest extends IncomingMessage {
@@ -58,6 +73,19 @@ function createDefaultState(): PersistedServerState {
     currentDateText: getTodayIndonesian(),
     isAutoDate: true,
     updatedAt: new Date().toISOString(),
+  };
+}
+
+function createDefaultLiteState(): LiteServerState {
+  return {
+    version: 1,
+    jobs: DEFAULT_JOBS,
+    currentDateText: getTodayIndonesian(),
+    isAutoDate: true,
+    updatedAt: new Date().toISOString(),
+    brandingUpdatedAt: null,
+    archiveFinishCount: 0,
+    archiveDeletedCount: 0,
   };
 }
 
@@ -115,7 +143,7 @@ async function readJsonBody(req: VercelRequest): Promise<any> {
       }
       try {
         resolve(JSON.parse(raw));
-      } catch (err) {
+      } catch {
         reject(new Error('Format JSON request tidak valid'));
       }
     });
@@ -140,7 +168,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // === GET /api/health ===
+    // === GET /api/health (juga dipanggil harian oleh Vercel Cron agar Supabase Free Tier tidak auto-pause) ===
     if (method === 'GET' && (route === '/health' || route === '/')) {
       const configured = isSupabaseConfigured();
       let version = 1;
@@ -174,7 +202,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    // === GET /api/state ===
+    // === GET /api/state/version (super ringan: 1 row tanpa gambar) ===
+    if (method === 'GET' && route === '/state/version') {
+      const vInfo = isSupabaseConfigured() ? await fetchVersionFromSupabase() : null;
+      return sendJson(res, 200, {
+        success: true,
+        version: vInfo?.version ?? 1,
+        brandingUpdatedAt: vInfo?.brandingUpdatedAt ?? null,
+        clientCount: 1,
+        supportsSSE: false,
+        updatedAt: vInfo?.updatedAt ?? new Date().toISOString(),
+      });
+    }
+
+    // === GET /api/state/lite (hemat bandwidth: hanya jobs + tanggal + hitungan arsip, tanpa base64 gambar & tanpa baris arsip) ===
+    if (method === 'GET' && route === '/state/lite') {
+      const lite = isSupabaseConfigured()
+        ? (await loadLiteStateFromSupabase()) || createDefaultLiteState()
+        : createDefaultLiteState();
+
+      return sendJson(res, 200, {
+        success: true,
+        version: lite.version,
+        clientCount: 1,
+        supportsSSE: false,
+        storage: isSupabaseConfigured() ? 'supabase' : 'unconfigured',
+        data: lite,
+      });
+    }
+
+    // === GET /api/branding (hanya diambil saat buka awal atau saat logo/poster berubah) ===
+    if (method === 'GET' && route === '/branding') {
+      const bRes = isSupabaseConfigured() ? await loadBrandingFromSupabase() : null;
+      return sendJson(res, 200, {
+        success: true,
+        version: bRes?.version ?? 1,
+        brandingUpdatedAt: bRes?.brandingUpdatedAt ?? null,
+        branding: bRes?.branding ?? createDefaultState().branding,
+      });
+    }
+
+    // === GET /api/archives (on-demand saat modal Arsip dibuka atau ekspor cadangan) ===
+    if (method === 'GET' && route === '/archives') {
+      const aRes = isSupabaseConfigured() ? await loadArchivesFromSupabase() : null;
+      return sendJson(res, 200, {
+        success: true,
+        version: aRes?.version ?? 1,
+        archiveFinish: aRes?.archiveFinish ?? [],
+        archiveDeleted: aRes?.archiveDeleted ?? [],
+      });
+    }
+
+    // === GET /api/state (lengkap — untuk kompatibilitas & ekspor cadangan) ===
     if (method === 'GET' && route === '/state') {
       const state = isSupabaseConfigured()
         ? (await loadStateFromSupabase()) || createDefaultState()
@@ -190,18 +269,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // === GET /api/state/version ===
-    if (method === 'GET' && route === '/state/version') {
-      const vInfo = isSupabaseConfigured() ? await fetchVersionFromSupabase() : null;
-      return sendJson(res, 200, {
-        success: true,
-        version: vInfo?.version ?? 1,
-        clientCount: 1,
-        supportsSSE: false,
-        updatedAt: vInfo?.updatedAt ?? new Date().toISOString(),
-      });
-    }
-
     // === GET /api/auth/verify ===
     if (method === 'GET' && route === '/auth/verify') {
       const check = verifyAdminAuthHeader(req.headers.authorization);
@@ -211,16 +278,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return sendJson(res, 200, { valid: true, email: check.email, role: 'admin' });
     }
 
-    // === POST /api/auth/login (Verifikasi kredensial Admin di sisi server) ===
+    // === POST /api/auth/login (Verifikasi kredensial Admin + Rate Limit) ===
     if (method === 'POST' && route === '/auth/login') {
+      const clientIp = extractClientIp(
+        req.headers as Record<string, string | string[] | undefined>,
+        req.socket?.remoteAddress
+      );
+      const rateCheck = checkLoginRateLimit(clientIp);
+      if (!rateCheck.allowed) {
+        const waitMin = Math.max(1, Math.ceil((rateCheck.retryAfterSec || 60) / 60));
+        return sendJson(res, 429, {
+          success: false,
+          message: `Terlalu banyak percobaan login gagal. Coba lagi dalam ${waitMin} menit.`,
+        });
+      }
+
       const body = await readJsonBody(req);
       const { email, password } = body || {};
       if (!verifyAdminCredentials(email, password)) {
+        recordLoginFailure(clientIp);
         return sendJson(res, 401, {
           success: false,
           message: 'Email atau password salah. Silakan periksa kembali.',
         });
       }
+
+      clearLoginFailures(clientIp);
       const normalizedEmail = String(email).trim().toLowerCase();
       const { token, expiresAt } = createAdminToken(normalizedEmail);
       return sendJson(res, 200, {
@@ -256,11 +339,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const body = await readJsonBody(req);
-      const currentState = await loadExistingOrDefault();
-      const nextVersion = Math.max(currentState.version || 1, 1) + 1;
       const nowIso = new Date().toISOString();
 
-      // POST /api/jobs
+      // POST /api/jobs/upsert (Multi-Admin Safe: simpan 1 pekerjaan saja tanpa menimpa editan Admin lain)
+      if (route === '/jobs/upsert') {
+        const { job } = body;
+        if (!job || typeof job !== 'object') {
+          return sendJson(res, 400, {
+            success: false,
+            message: 'Format data pekerjaan tidak valid',
+          });
+        }
+
+        const result = await upsertSingleJobInSupabase(job, nowIso);
+        return sendJson(res, 200, {
+          success: true,
+          version: result.version,
+          jobs: result.jobs,
+          message: 'Pekerjaan berhasil disimpan dan disinkronkan ke Supabase',
+        });
+      }
+
+      // POST /api/jobs (Bulk replace untuk Impor Excel / Restore Backup)
       if (route === '/jobs') {
         const { jobs } = body;
         if (!Array.isArray(jobs)) {
@@ -270,25 +370,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
         }
 
-        const nextState: PersistedServerState = {
-          ...currentState,
+        await syncJobsToSupabase(jobs, nowIso);
+        const version = await bumpSettingsVersionInSupabase(nowIso);
+
+        return sendJson(res, 200, {
+          success: true,
+          version,
           jobs,
-          version: nextVersion,
-          updatedAt: nowIso,
-        };
-        await saveStateToSupabase(nextState, { jobs: true, settings: true });
-
-        return sendJson(res, 200, {
-          success: true,
-          version: nextState.version,
           message: 'Daftar pekerjaan berhasil diperbarui dan disimpan ke Supabase',
-          data: nextState,
         });
       }
 
-      // POST /api/jobs/finish
+      // POST /api/jobs/finish (Mendukung single-job multi-admin-safe maupun bulk)
       if (route === '/jobs/finish') {
+        if (body.job && typeof body.job === 'object') {
+          const result = await archiveSingleJobInSupabase(body.job, 'FINISH', nowIso);
+          return sendJson(res, 200, {
+            success: true,
+            version: result.version,
+            jobs: result.jobs,
+            message: 'Pekerjaan selesai & arsip berhasil diperbarui secara aman',
+          });
+        }
+
         const { jobs, archiveFinish, archiveDeleted } = body;
+        const currentState = await loadExistingOrDefault();
+        const nextVersion = Math.max(currentState.version || 1, 1) + 1;
         const nextState: PersistedServerState = {
           ...currentState,
           jobs: Array.isArray(jobs) ? jobs : currentState.jobs,
@@ -304,20 +411,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await saveStateToSupabase(nextState, {
           jobs: true,
           archives: true,
-          settings: true,
+          settings: false,
         });
 
         return sendJson(res, 200, {
           success: true,
           version: nextState.version,
+          jobs: nextState.jobs,
           message: 'Pekerjaan selesai & arsip berhasil diperbarui secara aman',
-          data: nextState,
         });
       }
 
-      // POST /api/jobs/delete
+      // POST /api/jobs/delete (Mendukung single-job multi-admin-safe maupun bulk)
       if (route === '/jobs/delete') {
+        if (body.job && typeof body.job === 'object') {
+          const result = await archiveSingleJobInSupabase(
+            body.job,
+            'DELETED',
+            nowIso,
+            body.deleteReason
+          );
+          return sendJson(res, 200, {
+            success: true,
+            version: result.version,
+            jobs: result.jobs,
+            message: 'Pekerjaan dihapus & arsip berhasil diperbarui secara aman',
+          });
+        }
+
         const { jobs, archiveDeleted, archiveFinish } = body;
+        const currentState = await loadExistingOrDefault();
+        const nextVersion = Math.max(currentState.version || 1, 1) + 1;
         const nextState: PersistedServerState = {
           ...currentState,
           jobs: Array.isArray(jobs) ? jobs : currentState.jobs,
@@ -333,20 +457,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await saveStateToSupabase(nextState, {
           jobs: true,
           archives: true,
-          settings: true,
+          settings: false,
         });
 
         return sendJson(res, 200, {
           success: true,
           version: nextState.version,
+          jobs: nextState.jobs,
           message: 'Pekerjaan dihapus & arsip berhasil diperbarui secara aman',
-          data: nextState,
         });
       }
 
-      // POST /api/jobs/restore
+      // POST /api/jobs/restore (Mendukung single-item multi-admin-safe maupun bulk)
       if (route === '/jobs/restore') {
+        if (body.item && typeof body.item === 'object') {
+          const archiveType = body.archiveType === 'DELETED' ? 'DELETED' : 'FINISH';
+          const result = await restoreSingleJobInSupabase(body.item, archiveType, nowIso);
+          return sendJson(res, 200, {
+            success: true,
+            version: result.version,
+            jobs: result.jobs,
+            message: 'Pekerjaan berhasil dipulihkan dari arsip',
+          });
+        }
+
         const { jobs, archiveFinish, archiveDeleted } = body;
+        const currentState = await loadExistingOrDefault();
+        const nextVersion = Math.max(currentState.version || 1, 1) + 1;
         const nextState: PersistedServerState = {
           ...currentState,
           jobs: Array.isArray(jobs) ? jobs : currentState.jobs,
@@ -362,45 +499,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await saveStateToSupabase(nextState, {
           jobs: true,
           archives: true,
-          settings: true,
+          settings: false,
         });
 
         return sendJson(res, 200, {
           success: true,
           version: nextState.version,
+          jobs: nextState.jobs,
           message: 'Pekerjaan berhasil dipulihkan dari arsip',
-          data: nextState,
         });
       }
 
-      // POST /api/archive
+      // POST /api/archive/delete (Hapus permanen 1 item arsip secara aman)
+      if (route === '/archive/delete') {
+        const { id, archiveType } = body;
+        if (id == null || (archiveType !== 'FINISH' && archiveType !== 'DELETED')) {
+          return sendJson(res, 400, {
+            success: false,
+            message: 'Parameter id dan archiveType tidak valid',
+          });
+        }
+
+        const version = await deleteSingleArchiveInSupabase(Number(id), archiveType, nowIso);
+        return sendJson(res, 200, {
+          success: true,
+          version,
+          message: 'Item arsip berhasil dihapus permanen',
+        });
+      }
+
+      // POST /api/archive (Bulk sync arsip)
       if (route === '/archive') {
         const { archiveFinish, archiveDeleted } = body;
-        const nextState: PersistedServerState = {
-          ...currentState,
-          archiveFinish: Array.isArray(archiveFinish)
-            ? archiveFinish
-            : currentState.archiveFinish,
-          archiveDeleted: Array.isArray(archiveDeleted)
-            ? archiveDeleted
-            : currentState.archiveDeleted,
-          version: nextVersion,
-          updatedAt: nowIso,
-        };
-        await saveStateToSupabase(nextState, { archives: true, settings: true });
+        await syncArchivesToSupabase(
+          Array.isArray(archiveFinish) ? archiveFinish : [],
+          Array.isArray(archiveDeleted) ? archiveDeleted : []
+        );
+        const version = await bumpSettingsVersionInSupabase(nowIso);
 
         return sendJson(res, 200, {
           success: true,
-          version: nextState.version,
+          version,
           message: 'Arsip berhasil diperbarui dan disimpan ke Supabase',
-          data: {
-            archiveFinish: nextState.archiveFinish,
-            archiveDeleted: nextState.archiveDeleted,
-          },
         });
       }
 
-      // POST /api/branding
+      // POST /api/branding (Hanya perbarui kolom branding + stempel updatedAt)
       if (route === '/branding') {
         const { branding } = body;
         if (!branding || typeof branding !== 'object') {
@@ -410,71 +554,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
         }
 
-        const nextState: PersistedServerState = {
-          ...currentState,
-          branding: {
-            ...currentState.branding,
-            ...branding,
-          },
-          version: nextVersion,
+        const existingBranding = (await loadBrandingFromSupabase())?.branding ?? createDefaultState().branding;
+        const mergedBranding = {
+          ...existingBranding,
+          ...branding,
           updatedAt: nowIso,
         };
-        await saveStateToSupabase(nextState, { settings: true });
+        const version = await bumpSettingsVersionInSupabase(nowIso, {
+          branding: mergedBranding,
+        });
 
         return sendJson(res, 200, {
           success: true,
-          version: nextState.version,
+          version,
+          brandingUpdatedAt: nowIso,
+          branding: mergedBranding,
           message: 'Branding berhasil diperbarui dan disimpan ke Supabase',
-          data: nextState,
         });
       }
 
-      // POST /api/date
+      // POST /api/date (Hanya perbarui kolom tanggal — tidak menyentuh gambar branding)
       if (route === '/date') {
         const { currentDateText, isAutoDate } = body;
-        const nextState: PersistedServerState = {
-          ...currentState,
-          currentDateText:
-            typeof currentDateText === 'string'
-              ? currentDateText
-              : currentState.currentDateText,
-          isAutoDate:
-            typeof isAutoDate === 'boolean' ? isAutoDate : currentState.isAutoDate,
-          version: nextVersion,
-          updatedAt: nowIso,
-        };
-        await saveStateToSupabase(nextState, { settings: true });
-
-        return sendJson(res, 200, {
-          success: true,
-          version: nextState.version,
-          message: 'Tanggal berhasil disimpan ke Supabase',
-          data: nextState,
+        const version = await bumpSettingsVersionInSupabase(nowIso, {
+          ...(typeof currentDateText === 'string' ? { current_date_text: currentDateText } : {}),
+          ...(typeof isAutoDate === 'boolean' ? { is_auto_date: isAutoDate } : {}),
         });
-      }
-
-      // POST /api/pin
-      if (route === '/pin') {
-        const { pinCode } = body;
-        if (typeof pinCode !== 'string' || pinCode.trim().length < 4) {
-          return sendJson(res, 400, {
-            success: false,
-            message: 'PIN harus berupa minimal 4 digit angka',
-          });
-        }
-
-        const nextState: PersistedServerState = {
-          ...currentState,
-          pinCode: pinCode.trim(),
-          version: nextVersion,
-          updatedAt: nowIso,
-        };
-        await saveStateToSupabase(nextState, { settings: true });
 
         return sendJson(res, 200, {
           success: true,
-          version: nextState.version,
-          message: 'PIN berhasil diperbarui dan disimpan ke Supabase',
+          version,
+          message: 'Tanggal berhasil disimpan ke Supabase',
         });
       }
 
@@ -484,12 +594,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           jobs,
           archiveFinish,
           archiveDeleted,
-          pinCode,
           branding,
           currentDateText,
           isAutoDate,
         } = body;
 
+        const currentState = await loadExistingOrDefault();
+        const nextVersion = Math.max(currentState.version || 1, 1) + 1;
+        const hasBrandingPatch = Boolean(branding && typeof branding === 'object');
         const nextState: PersistedServerState = {
           ...currentState,
           jobs: Array.isArray(jobs) ? jobs : currentState.jobs,
@@ -499,12 +611,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           archiveDeleted: Array.isArray(archiveDeleted)
             ? archiveDeleted
             : currentState.archiveDeleted,
-          pinCode:
-            typeof pinCode === 'string' && pinCode ? pinCode : currentState.pinCode,
-          branding:
-            branding && typeof branding === 'object'
-              ? { ...currentState.branding, ...branding }
-              : currentState.branding,
+          branding: hasBrandingPatch
+            ? { ...currentState.branding, ...branding, updatedAt: nowIso }
+            : currentState.branding,
           currentDateText:
             typeof currentDateText === 'string'
               ? currentDateText
@@ -518,7 +627,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await saveStateToSupabase(nextState, {
           jobs: Array.isArray(jobs),
           archives: Array.isArray(archiveFinish) || Array.isArray(archiveDeleted),
-          settings: true,
+          settings: hasBrandingPatch,
         });
 
         return sendJson(res, 200, {
@@ -529,23 +638,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
-      // POST /api/reset
+      // POST /api/reset (Kosongkan daftar pekerjaan aktif saja — arsip & branding tetap aman)
       if (route === '/reset') {
-        const nextState: PersistedServerState = {
-          ...currentState,
-          jobs: DEFAULT_JOBS,
-          currentDateText: getTodayIndonesian(),
-          isAutoDate: true,
-          version: nextVersion,
-          updatedAt: nowIso,
-        };
-        await saveStateToSupabase(nextState, { jobs: true, settings: true });
+        await syncJobsToSupabase(DEFAULT_JOBS, nowIso);
+        const version = await bumpSettingsVersionInSupabase(nowIso, {
+          current_date_text: getTodayIndonesian(),
+          is_auto_date: true,
+        });
 
         return sendJson(res, 200, {
           success: true,
-          version: nextState.version,
-          message: 'Data berhasil direset dan disimpan ke Supabase',
-          data: nextState,
+          version,
+          message: 'Daftar pekerjaan berhasil dikosongkan dan disimpan ke Supabase',
         });
       }
     }

@@ -1,5 +1,4 @@
 import React, { useState, useRef } from 'react';
-import * as XLSX from 'xlsx';
 import { JobItem, BrandingImages, SyncStatusType } from '../types';
 import { normalizeWorkStatus } from '../utils/jobCalculations';
 import {
@@ -50,8 +49,9 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
     setSuccessMessage(null);
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
+        const XLSX = await import('xlsx');
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
         const firstSheetName = workbook.SheetNames[0];
@@ -63,6 +63,7 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
           return;
         }
 
+        const usedIds = new Set<number>();
         const parsedJobs: JobItem[] = jsonData.map((row, idx) => {
           const normalized: Record<string, unknown> = {};
           Object.keys(row).forEach((k) => {
@@ -161,8 +162,14 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
             status = 'SELESAI';
           }
 
+          let resolvedId = Number(normalized['no'] || normalized['id']);
+          if (!Number.isFinite(resolvedId) || resolvedId <= 0 || usedIds.has(resolvedId)) {
+            resolvedId = Date.now() + idx;
+          }
+          usedIds.add(resolvedId);
+
           return {
-            id: Number(normalized['no'] || normalized['id'] || idx + 1),
+            id: resolvedId,
             deskripsi,
             area,
             pic: pic || undefined,
@@ -250,8 +257,9 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
     }
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     try {
+      const XLSX = await import('xlsx');
       const exportData = currentJobs.map((j, idx) => ({
         NO: idx + 1,
         'DESKRIPSI PEKERJAAN': j.deskripsi,

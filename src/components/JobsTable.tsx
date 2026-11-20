@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { JobItem, JobSortMode } from '../types';
 import { JobRow } from './JobRow';
 import { sortJobsByMode } from '../utils/jobCalculations';
@@ -22,6 +22,7 @@ interface JobsTableProps {
   onEditJob?: (job: JobItem) => void;
   onDeleteJob?: (id: number) => void;
   onFinishJob?: (job: JobItem) => void;
+  onQuickUpdateActual?: (job: JobItem, nextActual: number) => void;
   itemsPerPage?: number;
 }
 
@@ -35,10 +36,26 @@ export const JobsTable: React.FC<JobsTableProps> = ({
   onEditJob,
   onDeleteJob,
   onFinishJob,
+  onQuickUpdateActual,
   itemsPerPage = 7,
 }) => {
   const [currentPage, setCurrentPage] = useState<number>(0);
   const [countdown, setCountdown] = useState<number>(20);
+  const [editingRowIds, setEditingRowIds] = useState<Set<number>>(() => new Set());
+
+  const handleRowEditingChange = useCallback((jobId: number, isEditing: boolean) => {
+    setEditingRowIds((prev) => {
+      const has = prev.has(jobId);
+      if (isEditing && has) return prev;
+      if (!isEditing && !has) return prev;
+      const next = new Set(prev);
+      if (isEditing) next.add(jobId);
+      else next.delete(jobId);
+      return next;
+    });
+  }, []);
+
+  const isAnyInlineEditing = editingRowIds.size > 0;
 
   const sortedJobs = useMemo(
     () => sortJobsByMode(jobs, sortMode, currentDateText),
@@ -54,7 +71,7 @@ export const JobsTable: React.FC<JobsTableProps> = ({
   }, [totalPages, currentPage]);
 
   useEffect(() => {
-    if (!autoCycle || totalPages <= 1) {
+    if (!autoCycle || totalPages <= 1 || isAnyInlineEditing) {
       setCountdown(20);
       return;
     }
@@ -70,7 +87,7 @@ export const JobsTable: React.FC<JobsTableProps> = ({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [autoCycle, totalPages, currentPage]);
+  }, [autoCycle, totalPages, currentPage, isAnyInlineEditing]);
 
   const startIndex = currentPage * itemsPerPage;
   const currentJobs = sortedJobs.slice(startIndex, startIndex + itemsPerPage);
@@ -138,7 +155,10 @@ export const JobsTable: React.FC<JobsTableProps> = ({
           {totalPages > 1 && (
             <>
               <span className="text-xs font-medium text-blue-100/90 tabular-nums mr-1.5 whitespace-nowrap">
-                Rotasi <strong className="text-[#EA7A2D] font-mono-data">{autoCycle ? `${countdown}s` : 'Jeda'}</strong>
+                Rotasi{' '}
+                <strong className="text-[#EA7A2D] font-mono-data">
+                  {!autoCycle ? 'Jeda' : isAnyInlineEditing ? 'Edit' : `${countdown}s`}
+                </strong>
               </span>
 
               <button
@@ -204,6 +224,8 @@ export const JobsTable: React.FC<JobsTableProps> = ({
                   onEdit={onEditJob}
                   onDelete={onDeleteJob}
                   onFinish={onFinishJob}
+                  onQuickUpdateActual={onQuickUpdateActual}
+                  onEditingActualChange={(isEditing) => handleRowEditingChange(job.id, isEditing)}
                 />
               ))}
             </motion.div>

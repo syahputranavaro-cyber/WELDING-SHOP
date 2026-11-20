@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { JobItem } from '../types';
 import {
   Edit,
@@ -9,6 +9,9 @@ import {
   AlertTriangle,
   PauseCircle,
   TrendingUp,
+  Check,
+  X,
+  Pencil,
 } from 'lucide-react';
 import { evaluateJobHealth, getJobTotalDays } from '../utils/jobCalculations';
 
@@ -19,6 +22,8 @@ interface JobRowProps {
   onEdit?: (job: JobItem) => void;
   onDelete?: (id: number) => void;
   onFinish?: (job: JobItem) => void;
+  onQuickUpdateActual?: (job: JobItem, nextActual: number) => void;
+  onEditingActualChange?: (isEditing: boolean) => void;
 }
 
 export const JobRow: React.FC<JobRowProps> = ({
@@ -28,7 +33,74 @@ export const JobRow: React.FC<JobRowProps> = ({
   onEdit,
   onDelete,
   onFinish,
+  onQuickUpdateActual,
+  onEditingActualChange,
 }) => {
+  const [isEditingActual, setIsEditingActual] = useState(false);
+  const [draftActual, setDraftActual] = useState<string>(String(job.progress_actual));
+  const actualInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditingActual) {
+      actualInputRef.current?.focus();
+      actualInputRef.current?.select();
+    }
+  }, [isEditingActual]);
+
+  useEffect(() => {
+    return () => {
+      if (isEditingActual) {
+        onEditingActualChange?.(false);
+      }
+    };
+  }, [isEditingActual, onEditingActualChange]);
+
+  const openQuickEditActual = () => {
+    if (!onQuickUpdateActual) return;
+    setDraftActual(
+      Number.isInteger(job.progress_actual)
+        ? String(job.progress_actual)
+        : String(Number(job.progress_actual.toFixed(2)))
+    );
+    setIsEditingActual(true);
+    onEditingActualChange?.(true);
+  };
+
+  const closeQuickEditActual = () => {
+    setIsEditingActual(false);
+    onEditingActualChange?.(false);
+  };
+
+  const clampPct = (val: number) => {
+    const clamped = Math.min(100, Math.max(0, val));
+    return Number(clamped.toFixed(2));
+  };
+
+  const handleStepActual = (delta: number) => {
+    const parsed = parseFloat(draftActual.replace(',', '.'));
+    const base = Number.isFinite(parsed) ? parsed : job.progress_actual;
+    const next = clampPct(base + delta);
+    setDraftActual(String(next));
+    actualInputRef.current?.focus();
+  };
+
+  const commitQuickEditActual = () => {
+    if (!onQuickUpdateActual) {
+      closeQuickEditActual();
+      return;
+    }
+    const parsed = parseFloat(draftActual.replace(',', '.'));
+    if (!Number.isFinite(parsed)) {
+      closeQuickEditActual();
+      return;
+    }
+    const nextVal = clampPct(parsed);
+    closeQuickEditActual();
+    if (nextVal !== Number(job.progress_actual.toFixed(2))) {
+      onQuickUpdateActual(job, nextVal);
+    }
+  };
+
   const targetPct = Math.min(Math.max(job.progress_target, 0), 100);
   const actualPct = Math.min(Math.max(job.progress_actual, 0), 100);
   const totalDays = getJobTotalDays(job.start, job.finish);
@@ -238,26 +310,130 @@ export const JobRow: React.FC<JobRowProps> = ({
           </div>
         </div>
 
-        {/* Baris 2: Actual Progress (#1054C1) */}
+        {/* Baris 2: Actual Progress (#1054C1) + Fitur Edit Cepat (Admin) */}
         <div className="flex items-center gap-2">
           <span className="w-14 lg:w-[62px] text-right text-[clamp(0.62rem,0.72vw,0.76rem)] font-bold text-[#1054C1] flex-shrink-0">
             Actual
           </span>
-          <div className="flex-1 h-5 lg:h-[22px] bg-slate-100 rounded-md overflow-hidden relative ring-1 ring-inset ring-slate-200/90 min-w-0">
+
+          {isEditingActual ? (
             <div
-              className={`h-full transition-all duration-500 rounded-[5px] ${
-                isHold ? 'bg-slate-400' : 'bg-[#1054C1]'
-              }`}
-              style={{ width: `${actualPct}%` }}
-            />
+              className="flex-1 h-5 lg:h-[24px] flex items-center gap-1 min-w-0 select-text"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => handleStepActual(-5)}
+                title="Kurangi 5%"
+                className="h-full px-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono-data font-bold text-[10px] border border-slate-200 transition-colors flex-shrink-0"
+              >
+                -5
+              </button>
+              <div className="relative flex-1 min-w-[54px] max-w-[92px] h-full">
+                <input
+                  ref={actualInputRef}
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.5"
+                  value={draftActual}
+                  onChange={(e) => setDraftActual(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      commitQuickEditActual();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      closeQuickEditActual();
+                    }
+                  }}
+                  aria-label="Edit cepat Progress Actual (%)"
+                  className="w-full h-full bg-white border border-[#1054C1] rounded px-1.5 pr-4 text-[11px] font-mono-data font-bold text-slate-900 text-right focus:outline-none focus:ring-2 focus:ring-[#1054C1]/25"
+                />
+                <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-mono-data font-bold text-slate-400">
+                  %
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleStepActual(5)}
+                title="Tambah 5%"
+                className="h-full px-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono-data font-bold text-[10px] border border-slate-200 transition-colors flex-shrink-0"
+              >
+                +5
+              </button>
+              <button
+                type="button"
+                onClick={commitQuickEditActual}
+                title="Simpan Actual (Enter)"
+                className="h-full px-1.5 rounded bg-[#1054C1] hover:bg-[#032F73] text-white flex items-center justify-center transition-colors flex-shrink-0"
+                aria-label="Simpan Actual"
+              >
+                <Check className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                onClick={closeQuickEditActual}
+                title="Batal (Esc)"
+                className="h-full px-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center border border-slate-200 transition-colors flex-shrink-0"
+                aria-label="Batal edit Actual"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ) : (
             <div
-              className={`absolute inset-0 flex items-center justify-center text-[clamp(0.64rem,0.74vw,0.78rem)] font-bold font-mono-data tabular-nums ${
-                actualPct > 52 ? 'text-white' : 'text-slate-800'
+              role={onQuickUpdateActual ? 'button' : undefined}
+              tabIndex={onQuickUpdateActual ? 0 : undefined}
+              onClick={onQuickUpdateActual ? openQuickEditActual : undefined}
+              onKeyDown={
+                onQuickUpdateActual
+                  ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openQuickEditActual();
+                      }
+                    }
+                  : undefined
+              }
+              title={
+                onQuickUpdateActual
+                  ? 'Klik untuk edit cepat Progress Actual'
+                  : `Actual: ${job.progress_actual.toFixed(2)}%`
+              }
+              className={`group/actual flex-1 h-5 lg:h-[22px] bg-slate-100 rounded-md overflow-hidden relative ring-1 ring-inset ring-slate-200/90 min-w-0 transition-all ${
+                onQuickUpdateActual
+                  ? 'cursor-pointer hover:ring-[#1054C1] focus:outline-none focus:ring-2 focus:ring-[#1054C1]'
+                  : ''
               }`}
             >
-              {job.progress_actual.toFixed(2)}%
+              <div
+                className={`h-full transition-all duration-500 rounded-[5px] ${
+                  isHold ? 'bg-slate-400' : 'bg-[#1054C1]'
+                }`}
+                style={{ width: `${actualPct}%` }}
+              />
+              <div
+                className={`absolute inset-0 flex items-center justify-center text-[clamp(0.64rem,0.74vw,0.78rem)] font-bold font-mono-data tabular-nums ${
+                  actualPct > 52 ? 'text-white' : 'text-slate-800'
+                }`}
+              >
+                {job.progress_actual.toFixed(2)}%
+              </div>
+              {onQuickUpdateActual && (
+                <span
+                  aria-hidden="true"
+                  className={`absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover/actual:opacity-100 transition-opacity flex items-center justify-center rounded p-0.5 ${
+                    actualPct > 86
+                      ? 'text-white/95 bg-black/15'
+                      : 'text-[#1054C1] bg-white/85 shadow-2xs'
+                  }`}
+                >
+                  <Pencil className="w-2.5 h-2.5" />
+                </span>
+              )}
             </div>
-          </div>
+          )}
         </div>
       </div>
 

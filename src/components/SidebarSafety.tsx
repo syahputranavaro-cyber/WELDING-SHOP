@@ -181,7 +181,7 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
           </span>
         </div>
 
-        {/* Ringkasan Mini: On Track / Delay / Selesai Bulan Ini */}
+        {/* Ringkasan Mini: On Track / Delay / HOLD */}
         <div
           id="sidebar-mini-summary"
           className="grid grid-cols-3 border-t border-slate-100 bg-[#F8FAFC] divide-x divide-slate-200/75 text-center"
@@ -208,24 +208,19 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
             </span>
           </div>
 
-          <div className="py-1.5 px-1 flex flex-col items-center" title="Pekerjaan selesai (Finish) bulan ini">
-            <span className="text-sm font-bold text-[#032F73] font-mono-data tabular-nums leading-tight">
-              {finishedThisMonthCount}
+          <div className="py-1.5 px-1 flex flex-col items-center" title="Pekerjaan dengan status HOLD (ditunda)">
+            <span
+              className={`text-sm font-bold font-mono-data tabular-nums leading-tight ${
+                holdCount > 0 ? 'text-amber-600' : 'text-slate-400'
+              }`}
+            >
+              {holdCount}
             </span>
             <span className="text-[9.5px] font-semibold text-slate-500 leading-tight mt-0.5 whitespace-nowrap">
-              Selesai Bln
+              HOLD
             </span>
           </div>
         </div>
-
-        {holdCount > 0 && (
-          <div className="border-t border-amber-100 bg-amber-50/70 px-3 py-1 flex items-center justify-between text-[10.5px]">
-            <span className="font-semibold text-amber-800">Status HOLD</span>
-            <span className="font-bold font-mono-data text-amber-800 tabular-nums">
-              {holdCount} Job
-            </span>
-          </div>
-        )}
       </div>
 
       {/* PANEL GAMBAR K3 / SAFETY (Corporate Navy #032F73) */}

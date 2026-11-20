@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { BrandingImages } from '../types';
-import { apiFetchState } from '../utils/syncService';
+import { apiFetchBranding } from '../utils/syncService';
 import {
   LogIn,
   Loader2,
@@ -45,11 +45,11 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
     setBranding(readCachedBranding());
 
     let cancelled = false;
-    apiFetchState().then((res) => {
-      if (cancelled || !res?.data?.branding) return;
-      setBranding(res.data.branding);
+    apiFetchBranding().then((res) => {
+      if (cancelled || !res?.branding) return;
+      setBranding(res.branding);
       try {
-        localStorage.setItem('welding_shop_branding_v3', JSON.stringify(res.data.branding));
+        localStorage.setItem('welding_shop_branding_v3', JSON.stringify(res.branding));
       } catch {
         // ignore
       }

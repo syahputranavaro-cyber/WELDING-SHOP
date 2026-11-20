@@ -34,6 +34,7 @@ export interface BrandingImages {
   weldingLogoUrl: string | null;
   k3PosterUrl: string | null;
   useCustomK3Image: boolean;
+  updatedAt?: string;
 }
 
 export type SyncStatusType = 'connected' | 'saving' | 'synced-cloud' | 'offline';
@@ -43,7 +44,6 @@ export interface ServerSyncState {
   jobs: JobItem[];
   archiveFinish?: ArchivedJobItem[];
   archiveDeleted?: ArchivedJobItem[];
-  pinCode?: string;
   branding: BrandingImages;
   currentDateText: string;
   isAutoDate: boolean;

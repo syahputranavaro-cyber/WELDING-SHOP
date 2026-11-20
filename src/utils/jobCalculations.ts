@@ -83,18 +83,42 @@ export function parseDate(dateInput: string | Date | null | undefined): Date | n
   return null;
 }
 
+const APP_TIMEZONE = 'Asia/Makassar';
+
+function getTodayPartsInWita(dateInput?: Date): { year: number; month: number; day: number } {
+  const date = dateInput || new Date();
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: APP_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const parts = formatter.formatToParts(date);
+    const year = Number(parts.find((p) => p.type === 'year')?.value);
+    const month = Number(parts.find((p) => p.type === 'month')?.value);
+    const day = Number(parts.find((p) => p.type === 'day')?.value);
+    if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+      return { year, month, day };
+    }
+  } catch {
+    // fallback to local time if Intl timezone is unavailable
+  }
+  return {
+    year: date.getFullYear(),
+    month: date.getMonth() + 1,
+    day: date.getDate(),
+  };
+}
+
 /**
  * Format tanggal ke format ISO (YYYY-MM-DD) untuk input type="date"
  */
 export function formatToISO(dateInput: string | Date | null | undefined): string {
   const d = parseDate(dateInput);
   if (!d) {
-    // Default to current date in ISO
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+    const { year, month, day } = getTodayPartsInWita();
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth() + 1).padStart(2, '0');
@@ -115,21 +139,13 @@ export function formatToIndonesian(dateInput: string | Date | null | undefined):
 }
 
 /**
- * Mengambil tanggal saat ini secara otomatis dari sistem komputer
- * dan memformatnya ke Bahasa Indonesia (contoh: "11 September 2026").
- * Menggunakan toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
+ * Mengambil tanggal saat ini secara otomatis dengan zona waktu WITA (Asia/Makassar)
+ * agar seluruh TV dan perangkat selalu menampilkan tanggal yang seragam dengan server.
  */
 export function getSystemDateFormatted(dateInput?: Date): string {
-  const date = dateInput || new Date();
-  try {
-    return date.toLocaleDateString('id-ID', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    });
-  } catch {
-    return formatToIndonesian(date);
-  }
+  const { year, month, day } = getTodayPartsInWita(dateInput);
+  const monthName = INDO_MONTHS[month - 1] || INDO_MONTHS[0];
+  return `${day} ${monthName} ${year}`;
 }
 
 /**
