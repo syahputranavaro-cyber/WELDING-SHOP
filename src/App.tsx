@@ -319,7 +319,9 @@ export default function App() {
       }
       setJobs((prevJobs) => recalculateJobsSchedule(prevJobs, newDate));
       // Sinkronisasi perubahan tanggal ke server untuk seluruh perangkat
-      apiSaveDate(newDate, !isManual);
+      apiSaveDate(newDate, !isManual).then((res) => {
+        if (res.success && res.version) serverVersionRef.current = res.version;
+      });
       if (isManual) {
         setToastMessage(`Mode Simulasi: Tanggal diatur ke ${newDate}. Disinkronkan ke seluruh perangkat.`);
       } else {
@@ -342,7 +344,9 @@ export default function App() {
     }
     setJobs((prevJobs) => recalculateJobsSchedule(prevJobs, today));
     // Sinkronisasi reset tanggal ke server untuk seluruh perangkat
-    apiSaveDate(today, true);
+    apiSaveDate(today, true).then((res) => {
+      if (res.success && res.version) serverVersionRef.current = res.version;
+    });
     setToastMessage(`Kembali ke tanggal sistem otomatis: ${today}. Disinkronkan ke seluruh perangkat.`);
   }, []);
 
@@ -434,10 +438,86 @@ export default function App() {
     }
   }, [archiveDeleted]);
 
+  // Helper: Simpan seluruh state dengan pemecahan otomatis jika ukuran > 2.8 MB (aman batas payload 4.5 MB Vercel)
+  const saveFullStateSafe = useCallback(
+    async (payload: {
+      jobs: JobItem[];
+      archiveFinish: ArchivedJobItem[];
+      archiveDeleted: ArchivedJobItem[];
+      branding: BrandingImages;
+      pinCode: string;
+      currentDateText: string;
+      isAutoDate: boolean;
+    }): Promise<{ success: boolean; version?: number; message?: string }> => {
+      const approxBytes = JSON.stringify(payload).length;
+      if (approxBytes < 2_800_000) {
+        return apiSaveFullState(payload);
+      }
+
+      // 1. Kirim data inti (jobs, arsip, PIN, tanggal) tanpa gambar besar
+      const coreRes = await apiSaveFullState({
+        jobs: payload.jobs,
+        archiveFinish: payload.archiveFinish,
+        archiveDeleted: payload.archiveDeleted,
+        pinCode: payload.pinCode,
+        currentDateText: payload.currentDateText,
+        isAutoDate: payload.isAutoDate,
+      });
+      if (!coreRes.success) return coreRes;
+
+      let latestVersion = coreRes.version;
+
+      // 2. Kirim gambar branding satu per satu agar masing-masing jauh di bawah 4.5 MB
+      const brandingSteps: Partial<BrandingImages>[] = [
+        { companyLogoUrl: payload.branding.companyLogoUrl },
+        { weldingLogoUrl: payload.branding.weldingLogoUrl },
+        {
+          k3PosterUrl: payload.branding.k3PosterUrl,
+          useCustomK3Image: payload.branding.useCustomK3Image,
+        },
+      ];
+
+      for (const step of brandingSteps) {
+        const bRes = await apiSaveBranding(step);
+        if (!bRes.success) return bRes;
+        if (bRes.version) latestVersion = bRes.version;
+      }
+
+      return { success: true, version: latestVersion };
+    },
+    []
+  );
+
+  // Helper: Simpan branding dengan pemecahan otomatis jika 3 gambar sekaligus > 2.8 MB
+  const saveBrandingSafe = useCallback(
+    async (updated: BrandingImages): Promise<{ success: boolean; version?: number; message?: string }> => {
+      if (JSON.stringify({ branding: updated }).length < 2_800_000) {
+        return apiSaveBranding(updated);
+      }
+
+      let latestVersion: number | undefined;
+      const steps: Partial<BrandingImages>[] = [
+        { companyLogoUrl: updated.companyLogoUrl },
+        { weldingLogoUrl: updated.weldingLogoUrl },
+        {
+          k3PosterUrl: updated.k3PosterUrl,
+          useCustomK3Image: updated.useCustomK3Image,
+        },
+      ];
+      for (const step of steps) {
+        const res = await apiSaveBranding(step);
+        if (!res.success) return res;
+        if (res.version) latestVersion = res.version;
+      }
+      return { success: true, version: latestVersion };
+    },
+    []
+  );
+
   // Handler untuk menyimpan / menyinkronkan seluruh data secara paksa
   const handleForceSyncServer = useCallback(async () => {
     setSyncStatus('saving');
-    const res = await apiSaveFullState({
+    const res = await saveFullStateSafe({
       jobs,
       archiveFinish,
       archiveDeleted,
@@ -452,85 +532,91 @@ export default function App() {
       setToastMessage('Seluruh data pekerjaan, arsip & gambar berhasil disimpan ke server & disinkronkan!');
     } else {
       setSyncStatus('offline');
-      setToastMessage('Gagal menghubungi server. Periksa koneksi jaringan.');
+      setToastMessage(res.message || 'Gagal menghubungi server. Periksa koneksi jaringan.');
     }
-  }, [jobs, archiveFinish, archiveDeleted, branding, pinCode, currentDateText, isAutoDate]);
+  }, [saveFullStateSafe, jobs, archiveFinish, archiveDeleted, branding, pinCode, currentDateText, isAutoDate]);
 
-  // Real-Time Multi-Device Synchronization Engine (SSE + Polling Fallback)
+  // Real-Time Multi-Device Synchronization Engine (SSE untuk Express + Polling Hemat Kuota untuk Vercel Serverless)
   useEffect(() => {
     let eventSource: EventSource | null = null;
     let isMounted = true;
-    let pollInterval: NodeJS.Timeout | null = null;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
 
-    // 1. Ambil data awal dari server saat perangkat pertama kali terhubung
-    async function loadInitialState() {
-      try {
-        const res = await apiFetchState();
-        if (!isMounted || !res || !res.data) return;
-
-        serverVersionRef.current = res.version || 1;
-        setConnectedClients(res.clientCount || 1);
-        setSyncStatus('connected');
-
-        const serverData = res.data;
-        const isServerAuthoritative = (res.version || 1) > 1;
-        if (Array.isArray(serverData.jobs) && (serverData.jobs.length > 0 || isServerAuthoritative)) {
-          const activeDate = serverData.currentDateText || currentDateText;
-          setJobs(recalculateJobsSchedule(serverData.jobs, activeDate));
-          try {
-            localStorage.setItem('welding_shop_jobs_v3', JSON.stringify(serverData.jobs));
-          } catch {}
-        }
-        const serverFinish = Array.isArray(serverData.archiveFinish) ? serverData.archiveFinish : [];
-        const serverDeleted = Array.isArray(serverData.archiveDeleted) ? serverData.archiveDeleted : [];
-
-        if (isServerAuthoritative) {
-          setArchiveFinish(serverFinish);
-          setArchiveDeleted(serverDeleted);
-        } else {
-          // Gunakan penggabungan cerdas (mergeArchives) hanya jika server masih di state awal (v1)
-          setArchiveFinish((prevFinish) => {
-            const merged = mergeArchives(prevFinish, serverFinish);
-            if (merged.length > serverFinish.length) {
-              apiSaveArchive(merged, serverDeleted, 'Sinkronisasi pemulihan arsip dari perangkat');
-            }
-            return merged;
-          });
-
-          setArchiveDeleted((prevDeleted) => {
-            const merged = mergeArchives(prevDeleted, serverDeleted);
-            if (merged.length > serverDeleted.length) {
-              apiSaveArchive(serverFinish, merged, 'Sinkronisasi pemulihan arsip dari perangkat');
-            }
-            return merged;
-          });
-        }
-        if (typeof serverData.pinCode === 'string' && serverData.pinCode) {
-          setPinCode(serverData.pinCode);
-          try {
-            localStorage.setItem('welding_shop_pincode', serverData.pinCode);
-          } catch {}
-        }
-        if (serverData.branding) {
-          setBranding(serverData.branding);
-          try {
-            localStorage.setItem('welding_shop_branding_v3', JSON.stringify(serverData.branding));
-          } catch {}
-        }
-        if (typeof serverData.isAutoDate === 'boolean') {
-          setIsAutoDate(serverData.isAutoDate);
-        }
-        if (typeof serverData.currentDateText === 'string') {
-          setCurrentDateText(serverData.currentDateText);
-        }
-      } catch (err) {
-        console.warn('Gagal memuat state awal:', err);
+    const applyRemoteData = (data: any, showUpdateToast: boolean, customAction?: string) => {
+      if (!data) return;
+      if (Array.isArray(data.jobs)) {
+        const activeDate = data.currentDateText || currentDateText;
+        setJobs(recalculateJobsSchedule(data.jobs, activeDate));
+        try {
+          localStorage.setItem('welding_shop_jobs_v3', JSON.stringify(data.jobs));
+        } catch {}
       }
-    }
+      if (Array.isArray(data.archiveFinish)) {
+        setArchiveFinish(data.archiveFinish);
+        try {
+          localStorage.setItem('welding_shop_archive_finish', JSON.stringify(data.archiveFinish));
+        } catch {}
+      }
+      if (Array.isArray(data.archiveDeleted)) {
+        setArchiveDeleted(data.archiveDeleted);
+        try {
+          localStorage.setItem('welding_shop_archive_deleted', JSON.stringify(data.archiveDeleted));
+        } catch {}
+      }
+      if (typeof data.pinCode === 'string' && data.pinCode) {
+        setPinCode(data.pinCode);
+        try {
+          localStorage.setItem('welding_shop_pincode', data.pinCode);
+        } catch {}
+      }
+      if (data.branding) {
+        setBranding(data.branding);
+        try {
+          localStorage.setItem('welding_shop_branding_v3', JSON.stringify(data.branding));
+        } catch {}
+      }
+      if (typeof data.isAutoDate === 'boolean') {
+        setIsAutoDate(data.isAutoDate);
+      }
+      if (typeof data.currentDateText === 'string') {
+        setCurrentDateText(data.currentDateText);
+      }
+      if (showUpdateToast) {
+        setToastMessage(
+          customAction
+            ? `⚡ Terupdate dari perangkat lain: ${customAction}`
+            : '⚡ Data diperbarui otomatis dari server.'
+        );
+      }
+    };
 
-    loadInitialState();
+    const checkVersionAndSync = async () => {
+      if (!isMounted) return;
+      try {
+        const vInfo = await apiFetchVersion();
+        if (!vInfo) {
+          if (isMounted) setSyncStatus('offline');
+          return;
+        }
 
-    // 2. Hubungkan ke Server-Sent Events (SSE) untuk push update seketika (< 100ms)
+        if (isMounted) {
+          setSyncStatus('connected');
+          if (vInfo.clientCount) setConnectedClients(vInfo.clientCount);
+        }
+
+        if (vInfo.version > serverVersionRef.current) {
+          const fullRes = await apiFetchState();
+          if (fullRes && fullRes.data && isMounted) {
+            serverVersionRef.current = fullRes.version;
+            applyRemoteData(fullRes.data, true);
+          }
+        }
+      } catch {
+        if (isMounted) setSyncStatus('offline');
+      }
+    };
+
+    // 1. Hubungkan ke Server-Sent Events (SSE) hanya jika backend mendukung SSE (Express)
     function setupSSE() {
       try {
         eventSource = new EventSource('/api/events');
@@ -556,44 +642,7 @@ export default function App() {
               const incomingVersion = payload.version;
               if (incomingVersion > serverVersionRef.current) {
                 serverVersionRef.current = incomingVersion;
-                const data = payload.data;
-                if (!data) return;
-
-                if (Array.isArray(data.jobs)) {
-                  const activeDate = data.currentDateText || currentDateText;
-                  setJobs(recalculateJobsSchedule(data.jobs, activeDate));
-                  try {
-                    localStorage.setItem('welding_shop_jobs_v3', JSON.stringify(data.jobs));
-                  } catch {}
-                }
-                if (Array.isArray(data.archiveFinish)) {
-                  setArchiveFinish(data.archiveFinish);
-                }
-                if (Array.isArray(data.archiveDeleted)) {
-                  setArchiveDeleted(data.archiveDeleted);
-                }
-                if (typeof data.pinCode === 'string' && data.pinCode) {
-                  setPinCode(data.pinCode);
-                  try {
-                    localStorage.setItem('welding_shop_pincode', data.pinCode);
-                  } catch {}
-                }
-                if (data.branding) {
-                  setBranding(data.branding);
-                  try {
-                    localStorage.setItem('welding_shop_branding_v3', JSON.stringify(data.branding));
-                  } catch {}
-                }
-                if (typeof data.isAutoDate === 'boolean') {
-                  setIsAutoDate(data.isAutoDate);
-                }
-                if (typeof data.currentDateText === 'string') {
-                  setCurrentDateText(data.currentDateText);
-                }
-
-                if (payload.action) {
-                  setToastMessage(`⚡ Terupdate dari perangkat lain: ${payload.action}`);
-                }
+                applyRemoteData(payload.data, Boolean(payload.action), payload.action);
               }
             }
           } catch (e) {
@@ -603,78 +652,108 @@ export default function App() {
 
         eventSource.onerror = () => {
           if (isMounted) setSyncStatus('offline');
-          // Browser EventSource otomatis reconnect di background
         };
       } catch (e) {
         console.warn('EventSource tidak dapat diinisialisasi:', e);
       }
     }
 
-    setupSSE();
-
-    // 3. Fallback Polling Ringan setiap 4 detik untuk memeriksa jika ada versi baru di server
-    pollInterval = setInterval(async () => {
-      if (!isMounted) return;
+    // 2. Ambil data awal dari server lalu tentukan mode sinkronisasi (SSE vs Vercel Serverless Polling)
+    async function initSync() {
+      let supportsSSE = true;
       try {
-        const vInfo = await apiFetchVersion();
-        if (!vInfo) {
-          if (isMounted) setSyncStatus('offline');
-          return;
-        }
+        const res = await apiFetchState();
+        if (!isMounted) return;
 
-        if (isMounted) {
+        if (res && res.data) {
+          supportsSSE = res.supportsSSE !== false;
+          serverVersionRef.current = res.version || 1;
+          setConnectedClients(res.clientCount || 1);
           setSyncStatus('connected');
-          if (vInfo.clientCount) setConnectedClients(vInfo.clientCount);
-        }
 
-        if (vInfo.version > serverVersionRef.current) {
-          const fullRes = await apiFetchState();
-          if (fullRes && fullRes.data && isMounted) {
-            serverVersionRef.current = fullRes.version;
-            const data = fullRes.data;
-            if (Array.isArray(data.jobs)) {
-              const activeDate = data.currentDateText || currentDateText;
-              setJobs(recalculateJobsSchedule(data.jobs, activeDate));
-              try {
-                localStorage.setItem('welding_shop_jobs_v3', JSON.stringify(data.jobs));
-              } catch {}
-            }
-            if (Array.isArray(data.archiveFinish)) {
-              setArchiveFinish(data.archiveFinish);
-              try {
-                localStorage.setItem('welding_shop_archive_finish', JSON.stringify(data.archiveFinish));
-              } catch {}
-            }
-            if (Array.isArray(data.archiveDeleted)) {
-              setArchiveDeleted(data.archiveDeleted);
-              try {
-                localStorage.setItem('welding_shop_archive_deleted', JSON.stringify(data.archiveDeleted));
-              } catch {}
-            }
-            if (typeof data.pinCode === 'string' && data.pinCode) {
-              setPinCode(data.pinCode);
-              try {
-                localStorage.setItem('welding_shop_pincode', data.pinCode);
-              } catch {}
-            }
-            if (data.branding) {
-              setBranding(data.branding);
-              try {
-                localStorage.setItem('welding_shop_branding_v3', JSON.stringify(data.branding));
-              } catch {}
-            }
-            if (typeof data.isAutoDate === 'boolean') setIsAutoDate(data.isAutoDate);
-            if (typeof data.currentDateText === 'string') setCurrentDateText(data.currentDateText);
-            setToastMessage('⚡ Data diperbarui otomatis dari server.');
+          const serverData = res.data;
+          const isServerAuthoritative = (res.version || 1) > 1;
+          if (Array.isArray(serverData.jobs) && (serverData.jobs.length > 0 || isServerAuthoritative)) {
+            const activeDate = serverData.currentDateText || currentDateText;
+            setJobs(recalculateJobsSchedule(serverData.jobs, activeDate));
+            try {
+              localStorage.setItem('welding_shop_jobs_v3', JSON.stringify(serverData.jobs));
+            } catch {}
+          }
+          const serverFinish = Array.isArray(serverData.archiveFinish) ? serverData.archiveFinish : [];
+          const serverDeleted = Array.isArray(serverData.archiveDeleted) ? serverData.archiveDeleted : [];
+
+          if (isServerAuthoritative) {
+            setArchiveFinish(serverFinish);
+            setArchiveDeleted(serverDeleted);
+          } else {
+            // Gunakan penggabungan cerdas (mergeArchives) hanya jika server masih di state awal (v1)
+            setArchiveFinish((prevFinish) => {
+              const merged = mergeArchives(prevFinish, serverFinish);
+              if (merged.length > serverFinish.length) {
+                apiSaveArchive(merged, serverDeleted, 'Sinkronisasi pemulihan arsip dari perangkat');
+              }
+              return merged;
+            });
+
+            setArchiveDeleted((prevDeleted) => {
+              const merged = mergeArchives(prevDeleted, serverDeleted);
+              if (merged.length > serverDeleted.length) {
+                apiSaveArchive(serverFinish, merged, 'Sinkronisasi pemulihan arsip dari perangkat');
+              }
+              return merged;
+            });
+          }
+          if (typeof serverData.pinCode === 'string' && serverData.pinCode) {
+            setPinCode(serverData.pinCode);
+            try {
+              localStorage.setItem('welding_shop_pincode', serverData.pinCode);
+            } catch {}
+          }
+          if (serverData.branding) {
+            setBranding(serverData.branding);
+            try {
+              localStorage.setItem('welding_shop_branding_v3', JSON.stringify(serverData.branding));
+            } catch {}
+          }
+          if (typeof serverData.isAutoDate === 'boolean') {
+            setIsAutoDate(serverData.isAutoDate);
+          }
+          if (typeof serverData.currentDateText === 'string') {
+            setCurrentDateText(serverData.currentDateText);
           }
         }
-      } catch {
-        if (isMounted) setSyncStatus('offline');
+      } catch (err) {
+        console.warn('Gagal memuat state awal:', err);
       }
-    }, 4000);
+
+      if (!isMounted) return;
+
+      if (supportsSSE) {
+        setupSSE();
+      }
+
+      // Polling 4 detik untuk server Express; 15 detik untuk Vercel Serverless agar hemat kuota Free Tier (4 TV 24/7 tetap aman)
+      const pollMs = supportsSSE ? 4000 : 15000;
+      pollInterval = setInterval(() => {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        checkVersionAndSync();
+      }, pollMs);
+    }
+
+    initSync();
+
+    // Langsung sinkronkan ulang begitu tab/layar kembali aktif
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        checkVersionAndSync();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       isMounted = false;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (eventSource) eventSource.close();
       if (pollInterval) clearInterval(pollInterval);
     };
@@ -778,7 +857,8 @@ export default function App() {
       }
       setCurrentDateText(resolvedDateText);
 
-      apiSaveFullState({
+      setSyncStatus('saving');
+      saveFullStateSafe({
         jobs: nextJobs,
         archiveFinish: nextFinish,
         archiveDeleted: nextDeleted,
@@ -787,16 +867,19 @@ export default function App() {
         currentDateText: resolvedDateText,
         isAutoDate: resolvedIsAutoDate,
       }).then((res) => {
-        if (res.success && res.version) {
-          serverVersionRef.current = res.version;
+        if (res.success) {
+          if (res.version) serverVersionRef.current = res.version;
+          setSyncStatus('connected');
+          setToastMessage(
+            `Berhasil memulihkan ${nextJobs.length} pekerjaan & ${nextFinish.length + nextDeleted.length} arsip ke database!`
+          );
+        } else {
+          setSyncStatus('offline');
+          setToastMessage(res.message || 'Gagal menyimpan cadangan ke server. Cek konfigurasi Supabase.');
         }
       });
-
-      setToastMessage(
-        `Berhasil memulihkan ${nextJobs.length} pekerjaan & ${nextFinish.length + nextDeleted.length} arsip ke server!`
-      );
     },
-    [currentDateText, jobs, archiveFinish, archiveDeleted, branding, pinCode, isAutoDate]
+    [saveFullStateSafe, currentDateText, jobs, archiveFinish, archiveDeleted, branding, pinCode, isAutoDate]
   );
 
   // Active jobs count: count jobs that are either AKTIF or actual progress < 100
@@ -816,8 +899,17 @@ export default function App() {
 
   const handleSaveBranding = (updated: BrandingImages) => {
     setBranding(updated);
-    apiSaveBranding(updated);
-    setToastMessage('Branding berhasil disimpan & disinkronkan ke semua perangkat.');
+    setSyncStatus('saving');
+    saveBrandingSafe(updated).then((res) => {
+      if (res.success) {
+        if (res.version) serverVersionRef.current = res.version;
+        setSyncStatus('connected');
+        setToastMessage('Branding berhasil disimpan & disinkronkan ke semua perangkat.');
+      } else {
+        setSyncStatus('offline');
+        setToastMessage(res.message || 'Gagal menyimpan branding ke server.');
+      }
+    });
   };
 
   const handleOpenAddJob = () => {
@@ -857,7 +949,15 @@ export default function App() {
         // ignore
       }
       // Kirim pembaruan ke server agar seketika tampil di semua perangkat
-      apiSaveJobs(recalculated, `Pekerjaan "${job.deskripsi}" disimpan`);
+      apiSaveJobs(recalculated, `Pekerjaan "${job.deskripsi}" disimpan`).then((res) => {
+        if (res.success) {
+          if (res.version) serverVersionRef.current = res.version;
+          setSyncStatus('connected');
+        } else {
+          setSyncStatus('offline');
+          setToastMessage(res.message || 'Gagal menyimpan perubahan ke server.');
+        }
+      });
       return recalculated;
     });
 
@@ -890,7 +990,15 @@ export default function App() {
         updatedDeleted,
         archiveFinish,
         `Pekerjaan "${desc}" dihapus & dipindahkan ke arsip`
-      );
+      ).then((res) => {
+        if (res.success) {
+          if (res.version) serverVersionRef.current = res.version;
+          setSyncStatus('connected');
+        } else {
+          setSyncStatus('offline');
+          setToastMessage(res.message || 'Gagal menghapus data di server.');
+        }
+      });
 
       setToastMessage(`Pekerjaan "${desc}" dihapus & tersimpan aman di Arsip Dihapus.`);
     }, `Menghapus Job: ${desc}`);
@@ -928,7 +1036,15 @@ export default function App() {
       updatedFinish,
       archiveDeleted,
       `Pekerjaan "${job.deskripsi}" selesai & diarsipkan`
-    );
+    ).then((res) => {
+      if (res.success) {
+        if (res.version) serverVersionRef.current = res.version;
+        setSyncStatus('connected');
+      } else {
+        setSyncStatus('offline');
+        setToastMessage(res.message || 'Gagal menyimpan status Finish ke server.');
+      }
+    });
 
     setToastMessage(`Pekerjaan "${job.deskripsi}" telah FINISH dan tersimpan di Arsip Selesai.`);
   };
@@ -959,7 +1075,15 @@ export default function App() {
         updatedFinish,
         updatedDeleted,
         `Pekerjaan "${item.deskripsi}" dipulihkan ke dashboard`
-      );
+      ).then((res) => {
+        if (res.success) {
+          if (res.version) serverVersionRef.current = res.version;
+          setSyncStatus('connected');
+        } else {
+          setSyncStatus('offline');
+          setToastMessage(res.message || 'Gagal memulihkan data di server.');
+        }
+      });
 
       setToastMessage(`Pekerjaan "${item.deskripsi}" berhasil dipulihkan ke dashboard aktif.`);
     }, `Memulihkan Pekerjaan: ${item.deskripsi}`);
@@ -977,7 +1101,14 @@ export default function App() {
         updatedDeleted = archiveDeleted.filter((a) => a.id !== item.id);
         setArchiveDeleted(updatedDeleted);
       }
-      apiSaveArchive(updatedFinish, updatedDeleted, `Pekerjaan "${item.deskripsi}" dihapus permanen`);
+      apiSaveArchive(updatedFinish, updatedDeleted, `Pekerjaan "${item.deskripsi}" dihapus permanen`).then((res) => {
+        if (res.success && res.version) {
+          serverVersionRef.current = res.version;
+        } else if (!res.success) {
+          setSyncStatus('offline');
+          setToastMessage(res.message || 'Gagal menghapus permanen di server.');
+        }
+      });
       setToastMessage(`Pekerjaan "${item.deskripsi}" dihapus permanen dari arsip.`);
     }, `Menghapus Permanen Pekerjaan: ${item.deskripsi}`);
   };
@@ -987,7 +1118,14 @@ export default function App() {
     try {
       localStorage.setItem('welding_shop_pincode', newPin);
     } catch {}
-    apiSavePin(newPin);
+    apiSavePin(newPin).then((res) => {
+      if (res.success && res.version) {
+        serverVersionRef.current = res.version;
+      } else if (!res.success) {
+        setSyncStatus('offline');
+        setToastMessage(res.message || 'Gagal menyimpan PIN baru ke server.');
+      }
+    });
     setToastMessage('PIN Keamanan baru berhasil disimpan & disinkronkan ke server.');
   };
 
@@ -1016,7 +1154,9 @@ export default function App() {
       updatedFinish,
       archiveDeleted,
       `Pekerjaan "${restored.deskripsi}" dikembalikan`
-    );
+    ).then((res) => {
+      if (res.success && res.version) serverVersionRef.current = res.version;
+    });
     setToastMessage(`Pekerjaan "${restored.deskripsi}" berhasil dikembalikan ke dashboard.`);
   };
 
@@ -1029,7 +1169,14 @@ export default function App() {
     } catch {
       // ignore
     }
-    apiSaveJobs(calculated, 'Impor data pekerjaan dari Excel');
+    apiSaveJobs(calculated, 'Impor data pekerjaan dari Excel').then((res) => {
+      if (res.success && res.version) {
+        serverVersionRef.current = res.version;
+      } else if (!res.success) {
+        setSyncStatus('offline');
+        setToastMessage(res.message || 'Gagal menyimpan impor Excel ke server.');
+      }
+    });
     setToastMessage(`${calculated.length} data pekerjaan berhasil dimuat & disinkronkan.`);
   };
 
@@ -1086,7 +1233,11 @@ export default function App() {
         if (sData.branding) setBranding(sData.branding);
         if (typeof sData.isAutoDate === 'boolean') setIsAutoDate(sData.isAutoDate);
         if (typeof sData.currentDateText === 'string') setCurrentDateText(sData.currentDateText);
-        setToastMessage(`Sinkronisasi server aktif (${serverRes.clientCount} perangkat terhubung).`);
+        setToastMessage(
+          serverRes.supportsSSE === false
+            ? 'Data berhasil disegarkan dari database cloud.'
+            : `Sinkronisasi server aktif (${serverRes.clientCount} perangkat terhubung).`
+        );
       }
     } catch {
       // ignore

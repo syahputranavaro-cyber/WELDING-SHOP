@@ -349,22 +349,27 @@ async function startServer() {
 
   // === API ROUTES ===
   app.get('/api/health', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     res.json({
       status: 'ok',
       time: new Date().toISOString(),
       version: currentState.version,
       connectedClients: sseClients.size,
       storage: isSupabaseConfigured() ? 'supabase' : 'local',
+      supportsSSE: true,
     });
   });
 
   // Ambil state lengkap (selalu cek versi terbaru dari Supabase jika aktif)
   app.get('/api/state', async (req, res) => {
     await hydrateOrRefreshFromSupabase(false);
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     res.json({
       success: true,
       version: currentState.version,
       clientCount: sseClients.size,
+      supportsSSE: true,
+      storage: isSupabaseConfigured() ? 'supabase' : 'local',
       data: currentState,
     });
   });
@@ -372,10 +377,12 @@ async function startServer() {
   // Cek versi state (sangat ringan untuk fallback polling & sinkronisasi lintas instance)
   app.get('/api/state/version', async (req, res) => {
     await hydrateOrRefreshFromSupabase(false);
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     res.json({
       success: true,
       version: currentState.version,
       clientCount: sseClients.size,
+      supportsSSE: true,
       updatedAt: currentState.updatedAt,
     });
   });
@@ -622,13 +629,22 @@ async function startServer() {
         if (Array.isArray(archiveFinish)) currentState.archiveFinish = archiveFinish;
         if (Array.isArray(archiveDeleted)) currentState.archiveDeleted = archiveDeleted;
         if (typeof pinCode === 'string' && pinCode) currentState.pinCode = pinCode;
-        if (branding && typeof branding === 'object') currentState.branding = branding;
+        if (branding && typeof branding === 'object') {
+          currentState.branding = {
+            ...currentState.branding,
+            ...branding,
+          };
+        }
         if (typeof currentDateText === 'string') currentState.currentDateText = currentDateText;
         if (typeof isAutoDate === 'boolean') currentState.isAutoDate = isAutoDate;
 
         currentState.version += 1;
         currentState.updatedAt = new Date().toISOString();
-        await commitState({ jobs: true, archives: true, settings: true });
+        await commitState({
+          jobs: Array.isArray(jobs),
+          archives: Array.isArray(archiveFinish) || Array.isArray(archiveDeleted),
+          settings: true,
+        });
       });
 
       broadcast('UPDATE_STATE', 'Pembaruan data lengkap dashboard');
