@@ -18,6 +18,7 @@ import {
   MapPin,
   FileText,
   Percent,
+  User,
 } from 'lucide-react';
 
 interface JobEditorModalProps {
@@ -58,6 +59,7 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
   const [area, setArea] = useState('Pabrik 1');
   const [isCustomArea, setIsCustomArea] = useState(false);
   const [customAreaText, setCustomAreaText] = useState('');
+  const [pic, setPic] = useState('');
 
   // Dates in ISO YYYY-MM-DD for native HTML5 datepickers
   const [startDate, setStartDate] = useState('2026-09-09');
@@ -77,6 +79,7 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
 
     if (jobToEdit) {
       setDeskripsi(jobToEdit.deskripsi);
+      setPic(jobToEdit.pic || '');
       const matchedArea = COMMON_AREAS.find(
         (a) => a.toLowerCase() === jobToEdit.area.trim().toLowerCase()
       );
@@ -98,6 +101,7 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
       setArea('Pabrik 1');
       setIsCustomArea(false);
       setCustomAreaText('');
+      setPic('');
       // Default: today to +6 days (total 7 days)
       setStartDate(isoRef);
       const d = parseDate(isoRef) || new Date();
@@ -136,6 +140,7 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
       id: jobToEdit?.id || Date.now(),
       deskripsi: deskripsi.trim(),
       area: finalArea.toUpperCase(),
+      pic: pic.trim() || undefined,
       start: formatToIndonesian(startDate),
       finish: formatToIndonesian(finishDate),
       progress_target: Number(effectiveTarget.toFixed(2)),
@@ -194,49 +199,70 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
             />
           </div>
 
-          {/* 2. Area / Lokasi Pabrik */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-              <MapPin className="w-4 h-4 text-[#032F73]" />
-              <span>2. Area / Lokasi Pabrik</span>
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <select
-                value={isCustomArea ? 'MANUAL' : area}
-                onChange={(e) => {
-                  if (e.target.value === 'MANUAL') {
-                    setIsCustomArea(true);
-                  } else {
-                    setIsCustomArea(false);
-                    setArea(e.target.value);
-                  }
-                }}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-[#032F73] text-sm"
-              >
-                {COMMON_AREAS.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-                <option value="MANUAL">✍️ Isi Manual (Lainnya)...</option>
-              </select>
+          {/* 2. Area / Lokasi Pabrik & PIC (Nama) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            {/* 2. Area / Lokasi Pabrik */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <MapPin className="w-4 h-4 text-[#032F73]" />
+                <span>2. Area / Lokasi Pabrik</span>
+              </label>
+              <div className="flex flex-col gap-1.5">
+                <select
+                  value={isCustomArea ? 'MANUAL' : area}
+                  onChange={(e) => {
+                    if (e.target.value === 'MANUAL') {
+                      setIsCustomArea(true);
+                    } else {
+                      setIsCustomArea(false);
+                      setArea(e.target.value);
+                    }
+                  }}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-[#032F73] text-sm"
+                >
+                  {COMMON_AREAS.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                  <option value="MANUAL">✍️ Isi Manual (Lainnya)...</option>
+                </select>
 
-              {isCustomArea ? (
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  placeholder="Ketik area / lokasi manual..."
-                  value={customAreaText}
-                  onChange={(e) => setCustomAreaText(e.target.value)}
-                  className="w-full bg-white border-2 border-[#032F73] rounded-lg px-3 py-2 text-slate-900 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-[#032F73]"
-                />
-              ) : (
-                <div className="text-xs text-slate-600 flex items-center px-3 py-2 bg-slate-100 rounded-lg border border-slate-200">
-                  <span>Area terpilih:</span>
-                  <strong className="ml-1.5 text-[#032F73] font-black">{area}</strong>
-                </div>
-              )}
+                {isCustomArea ? (
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    placeholder="Ketik area / lokasi manual..."
+                    value={customAreaText}
+                    onChange={(e) => setCustomAreaText(e.target.value)}
+                    className="w-full bg-white border-2 border-[#032F73] rounded-lg px-3 py-2 text-slate-900 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-[#032F73]"
+                  />
+                ) : (
+                  <div className="text-xs text-slate-600 flex items-center px-3 py-1.5 bg-slate-100 rounded-lg border border-slate-200">
+                    <span>Area terpilih:</span>
+                    <strong className="ml-1.5 text-[#032F73] font-black">{area}</strong>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* PIC (Nama Penanggung Jawab) */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <User className="w-4 h-4 text-[#032F73]" />
+                <span>PIC (Nama)</span>
+              </label>
+              <input
+                type="text"
+                placeholder="Contoh: Hendra W. / Agus P. / Budi"
+                value={pic}
+                onChange={(e) => setPic(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-bold placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#032F73] text-sm"
+              />
+              <span className="text-[11px] text-slate-500 font-medium">
+                Ditampilkan tepat di bawah Area/Lokasi pada tabel job
+              </span>
             </div>
           </div>
 

@@ -8,7 +8,9 @@ interface SidebarSafetyProps {
   completedJobsCount?: number;
   totalJobsCount: number;
   currentDateText: string;
-  onUpdateDateText?: (date: string) => void;
+  isAutoDate?: boolean;
+  onUpdateDateText?: (date: string, isManual?: boolean) => void;
+  onResetToAutoDate?: () => void;
   customK3PosterUrl?: string | null;
   useCustomK3Image?: boolean;
   onOpenUploadModal?: (tab?: 'company' | 'k3' | 'welding') => void;
@@ -17,7 +19,9 @@ interface SidebarSafetyProps {
 export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
   activeJobsCount,
   currentDateText,
+  isAutoDate = true,
   onUpdateDateText,
+  onResetToAutoDate,
   customK3PosterUrl,
   useCustomK3Image = false,
   onOpenUploadModal,
@@ -33,16 +37,17 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
   const handleDateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (onUpdateDateText && tempIsoDate) {
-      onUpdateDateText(formatToIndonesian(tempIsoDate));
+      onUpdateDateText(formatToIndonesian(tempIsoDate), true);
     }
     setIsEditingDate(false);
   };
 
   const handleSetToday = () => {
-    const today = new Date();
-    const formatted = formatToIndonesian(today);
-    if (onUpdateDateText) {
-      onUpdateDateText(formatted);
+    if (onResetToAutoDate) {
+      onResetToAutoDate();
+    } else if (onUpdateDateText) {
+      const today = new Date();
+      onUpdateDateText(formatToIndonesian(today), false);
     }
     setIsEditingDate(false);
   };
@@ -50,20 +55,43 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
   return (
     <aside
       id="dashboard-sidebar-safety"
-      className="w-56 lg:w-64 flex-shrink-0 flex flex-col gap-2.5 p-2.5 select-none h-full overflow-hidden bg-transparent"
+      className="w-[220px] min-w-[220px] max-w-[220px] flex-shrink-0 flex flex-col gap-2 p-2 select-none h-full overflow-hidden bg-transparent"
     >
       {/* KOTAK 1 (TANGGAL): Card Orange (#EA7A2D) dengan teks putih bold */}
       <div
         id="card-sidebar-tanggal"
-        className="w-full rounded-xl bg-[#EA7A2D] shadow-md border-2 border-orange-400 p-2.5 flex flex-col items-center justify-center text-center text-white relative group"
+        className="w-full rounded-xl bg-[#EA7A2D] shadow-xs border-2 border-orange-400 p-2 flex flex-col items-center justify-center text-center text-white relative group flex-shrink-0"
       >
-        <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-orange-100 mb-0.5">
-          <Calendar className="w-3.5 h-3.5 text-white" />
-          <span>HARI INI</span>
+        <div className="w-full flex items-center justify-between px-0.5 mb-1">
+          <div className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-orange-100">
+            <Calendar className="w-3.5 h-3.5 text-white" />
+            <span>HARI INI</span>
+          </div>
+
+          {/* Status Badge: Otomatis vs Simulasi */}
+          {isAutoDate ? (
+            <span
+              className="inline-flex items-center gap-1 bg-emerald-700/90 border border-emerald-300/80 text-white text-[9px] font-black px-1.5 py-0.2 rounded shadow-2xs"
+              title="Otomatis mengikuti tanggal real-time sistem komputer"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-200 animate-pulse" />
+              <span>Otomatis</span>
+            </span>
+          ) : (
+            <span
+              className="inline-flex items-center gap-1 bg-amber-950/90 border border-amber-300/80 text-yellow-300 text-[9px] font-black px-1.5 py-0.2 rounded shadow-2xs"
+              title="Mode simulasi manual aktif"
+            >
+              <span>Simulasi</span>
+            </span>
+          )}
         </div>
 
         {isEditingDate ? (
-          <form onSubmit={handleDateSubmit} className="w-full flex flex-col gap-1.5 mt-1">
+          <form onSubmit={handleDateSubmit} className="w-full flex flex-col gap-1.5 mt-0.5">
+            <div className="text-[10px] text-orange-100 font-semibold text-center">
+              Pilih Tanggal Simulasi:
+            </div>
             <input
               type="date"
               value={tempIsoDate}
@@ -77,19 +105,21 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
               }}
               autoFocus
             />
-            <div className="flex gap-1 justify-center">
+            <div className="flex flex-wrap gap-1 justify-center mt-0.5">
               <button
                 type="submit"
-                className="bg-[#032F73] hover:bg-blue-900 text-white text-[10px] font-black px-2.5 py-1 rounded shadow-xs transition-colors"
+                className="bg-[#032F73] hover:bg-blue-900 text-white text-[10px] font-black px-2 py-1 rounded shadow-xs transition-colors"
+                title="Terapkan tanggal simulasi"
               >
-                <Check className="w-3 h-3 inline mr-0.5" /> Simpan
+                <Check className="w-3 h-3 inline mr-0.5" /> Terapkan
               </button>
               <button
                 type="button"
                 onClick={handleSetToday}
-                className="bg-amber-900 hover:bg-amber-950 text-white text-[10px] font-bold px-2 py-1 rounded shadow-xs transition-colors"
+                className="bg-emerald-800 hover:bg-emerald-700 text-white text-[10px] font-bold px-2 py-1 rounded shadow-xs transition-colors"
+                title="Gunakan tanggal sistem hari ini secara otomatis"
               >
-                Hari Ini
+                Otomatis
               </button>
               <button
                 type="button"
@@ -101,23 +131,38 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
             </div>
           </form>
         ) : (
-          <div
-            onClick={handleOpenEdit}
-            title="Klik untuk ubah tanggal Hari Ini"
-            className="cursor-pointer group flex items-center justify-center gap-1.5 w-full py-0.5"
-          >
-            <span
-              className="text-base lg:text-lg font-bold tracking-tight text-white font-inter tabular-nums drop-shadow-sm group-hover:text-yellow-100"
-              style={{
-                fontFamily: "'Inter', sans-serif",
-                fontWeight: 600,
-                letterSpacing: '0.015em',
-                fontVariantNumeric: 'tabular-nums',
-              }}
+          <div className="w-full flex flex-col items-center">
+            <div
+              onClick={handleOpenEdit}
+              title="Klik untuk ubah/simulasi tanggal referensi"
+              className="cursor-pointer group flex items-center justify-center gap-1.5 w-full py-0.5"
             >
-              {currentDateText}
-            </span>
-            <Edit2 className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-yellow-200 transition-opacity" />
+              <span
+                className="text-base lg:text-lg font-bold tracking-tight text-white font-inter tabular-nums drop-shadow-sm group-hover:text-yellow-100 transition-colors"
+                style={{
+                  fontFamily: "'Inter', sans-serif",
+                  fontWeight: 600,
+                  letterSpacing: '0.015em',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {currentDateText}
+              </span>
+              <Edit2 className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-yellow-200 transition-opacity flex-shrink-0" />
+            </div>
+
+            {/* Opsi tombol kecil reset jika dalam mode simulasi */}
+            {!isAutoDate && onResetToAutoDate && (
+              <button
+                type="button"
+                onClick={onResetToAutoDate}
+                title="Kembalikan ke tanggal sistem otomatis"
+                className="mt-1 inline-flex items-center gap-1 bg-white/20 hover:bg-white/30 active:scale-95 text-white text-[9.5px] font-bold px-2 py-0.5 rounded shadow-2xs transition-all"
+              >
+                <RotateCcw className="w-2.5 h-2.5" />
+                <span>Reset ke Real-time</span>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -125,12 +170,12 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
       {/* KOTAK 2 (JOB AKTIF): Header #032F73 (Dark Navy) & Body Background Putih dengan angka besar */}
       <div
         id="card-sidebar-job-aktif"
-        className="w-full rounded-xl overflow-hidden shadow-md border-2 border-[#032F73] flex flex-col bg-white"
+        className="w-full rounded-xl overflow-hidden shadow-xs border-2 border-[#032F73] flex flex-col bg-white flex-shrink-0"
       >
         {/* Header Atas: #032F73 dengan teks JOB AKTIF */}
-        <div className="w-full bg-[#032F73] py-1.5 px-3 text-center">
+        <div className="w-full bg-[#032F73] py-1 px-2 text-center">
           <h2
-            className="text-white font-bold text-sm lg:text-base tracking-widest uppercase font-inter"
+            className="text-white font-bold text-xs lg:text-sm tracking-widest uppercase font-inter"
             style={{
               fontFamily: "'Inter', sans-serif",
               fontWeight: 700,
@@ -141,10 +186,10 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
           </h2>
         </div>
 
-        {/* Body Bawah: Background Putih dengan angka jumlah job aktif berukuran ekstra besar (Oswald 800) */}
-        <div className="w-full bg-white py-2 flex items-center justify-center">
+        {/* Body Bawah: Background Putih dengan angka jumlah job aktif berukuran besar (Oswald 800) */}
+        <div className="w-full bg-white py-1.5 flex items-center justify-center">
           <span
-            className="text-6xl lg:text-7xl xl:text-8xl text-[#032F73] font-oswald tabular-nums leading-none drop-shadow-xs"
+            className="text-5xl lg:text-6xl text-[#032F73] font-oswald tabular-nums leading-none drop-shadow-xs"
             style={{
               fontFamily: "'Oswald', sans-serif",
               fontWeight: 800,
@@ -159,7 +204,7 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
       {/* PANEL GAMBAR K3 / SAFETY (Vertikal - Background #032F73 Dark Navy Blue) */}
       <div
         id="panel-k3-safety-vertical"
-        className="flex-1 w-full rounded-xl bg-[#032F73] border-2 border-blue-950 p-1 shadow-md flex flex-col justify-center items-center overflow-hidden relative group"
+        className="flex-1 min-h-0 w-full rounded-xl bg-[#032F73] border-2 border-blue-950 p-1 shadow-xs flex flex-col justify-center items-center overflow-hidden relative group"
       >
         {/* Tombol Perintah Ganti / Upload Gambar K3 yang Selalu Tersedia */}
         {onOpenUploadModal && (

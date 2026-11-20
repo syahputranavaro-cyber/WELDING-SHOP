@@ -115,6 +115,24 @@ export function formatToIndonesian(dateInput: string | Date | null | undefined):
 }
 
 /**
+ * Mengambil tanggal saat ini secara otomatis dari sistem komputer
+ * dan memformatnya ke Bahasa Indonesia (contoh: "11 September 2026").
+ * Menggunakan toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
+ */
+export function getSystemDateFormatted(dateInput?: Date): string {
+  const date = dateInput || new Date();
+  try {
+    return date.toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+  } catch {
+    return formatToIndonesian(date);
+  }
+}
+
+/**
  * Menghitung selisih hari kalender (end - start)
  */
 export function diffInDays(start: Date, end: Date): number {

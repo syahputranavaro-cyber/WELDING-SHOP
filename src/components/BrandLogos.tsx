@@ -17,22 +17,22 @@ export const PupukKaltimLogo: React.FC<LogoProps> = ({
       id="brand-pupuk-kaltim"
       onClick={onClickUpload}
       title={onClickUpload ? 'Klik untuk ganti / upload logo asli' : undefined}
-      className={`group relative flex items-center gap-3 bg-white px-3.5 py-1.5 rounded-lg border border-slate-300 shadow-sm select-none transition-all ${
+      className={`group relative flex items-center gap-3.5 bg-white px-4 py-2 rounded-xl border-2 border-slate-200/90 shadow-sm select-none transition-all ${
         onClickUpload ? 'cursor-pointer hover:border-[#032F73] hover:shadow-md' : ''
       } ${className}`}
     >
       {customLogoUrl ? (
-        <div className="flex items-center gap-2 max-h-11">
+        <div className="flex items-center gap-2 max-h-14">
           <img
             src={customLogoUrl}
             alt="Logo Perusahaan"
-            className="max-h-10 max-w-[220px] object-contain"
+            className="max-h-12 max-w-[240px] object-contain"
           />
         </div>
       ) : (
         <>
           {/* Emblem Pupuk Kaltim Standar */}
-          <div className="relative w-10 h-10 flex-shrink-0 flex items-center justify-center">
+          <div className="relative w-11 h-11 lg:w-12 lg:h-12 flex-shrink-0 flex items-center justify-center">
             <svg viewBox="0 0 100 100" className="w-full h-full">
               {/* Blue Shield / Rounded Pentagon */}
               <path
@@ -62,21 +62,21 @@ export const PupukKaltimLogo: React.FC<LogoProps> = ({
 
           <div className="flex flex-col leading-none">
             <span
-              className="text-[#032F73] text-base lg:text-lg font-montserrat tracking-wider"
+              className="text-[#032F73] text-lg lg:text-xl font-montserrat tracking-wider"
               style={{
                 fontFamily: "'Montserrat', sans-serif",
-                fontWeight: 800,
+                fontWeight: 900,
                 letterSpacing: '0.05em',
               }}
             >
               PUPUK KALTIM
             </span>
             <span
-              className="text-[#032F73] text-[9px] lg:text-[10px] font-montserrat uppercase mt-0.5 tracking-widest"
+              className="text-[#EA7A2D] text-[10px] lg:text-[11px] font-montserrat uppercase mt-1 tracking-widest"
               style={{
                 fontFamily: "'Montserrat', sans-serif",
                 fontWeight: 800,
-                letterSpacing: '0.05em',
+                letterSpacing: '0.06em',
               }}
             >
               SBU JASA PELAYANAN PABRIK
@@ -87,8 +87,8 @@ export const PupukKaltimLogo: React.FC<LogoProps> = ({
 
       {/* Hover upload badge */}
       {onClickUpload && (
-        <div className="absolute -top-1.5 -right-1.5 bg-[#032F73] text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm">
-          <Camera className="w-2.5 h-2.5" />
+        <div className="absolute -top-1.5 -right-1.5 bg-[#032F73] text-white p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm">
+          <Camera className="w-3 h-3" />
         </div>
       )}
     </div>
@@ -105,22 +105,22 @@ export const WeldingShopLogo: React.FC<LogoProps> = ({
       id="brand-welding-shop"
       onClick={onClickUpload}
       title={onClickUpload ? 'Klik untuk ganti / upload logo welding shop' : undefined}
-      className={`group relative flex items-center gap-2.5 bg-white px-3.5 py-1.5 rounded-lg border border-slate-300 shadow-sm select-none transition-all ${
+      className={`group relative flex items-center gap-3 bg-white px-4 py-2 rounded-xl border-2 border-slate-200/90 shadow-sm select-none transition-all ${
         onClickUpload ? 'cursor-pointer hover:border-[#EA7A2D] hover:shadow-md' : ''
       } ${className}`}
     >
       {customLogoUrl ? (
-        <div className="flex items-center gap-2 max-h-11">
+        <div className="flex items-center gap-2 max-h-14">
           <img
             src={customLogoUrl}
             alt="Logo Welding Shop"
-            className="max-h-10 max-w-[200px] object-contain"
+            className="max-h-12 max-w-[220px] object-contain"
           />
         </div>
       ) : (
         <>
           {/* Factory / Welding Torch Spark Icon */}
-          <div className="w-10 h-10 rounded-md bg-[#032F73] flex items-center justify-center p-1.5 flex-shrink-0 shadow-inner">
+          <div className="w-11 h-11 lg:w-12 lg:h-12 rounded-lg bg-[#032F73] flex items-center justify-center p-2 flex-shrink-0 shadow-inner">
             <svg viewBox="0 0 48 48" className="w-full h-full">
               {/* Factory Silhouettes */}
               <path
@@ -135,23 +135,23 @@ export const WeldingShopLogo: React.FC<LogoProps> = ({
             </svg>
           </div>
 
-          <div className="flex flex-col leading-tight">
+          <div className="flex flex-col leading-none">
             <span
-              className="text-[#EA7A2D] text-base lg:text-lg font-montserrat tracking-wider"
+              className="text-[#EA7A2D] text-lg lg:text-xl font-montserrat tracking-wider"
               style={{
                 fontFamily: "'Montserrat', sans-serif",
-                fontWeight: 800,
+                fontWeight: 900,
                 letterSpacing: '0.05em',
               }}
             >
               WELDING SHOP
             </span>
             <span
-              className="text-[#032F73] text-[9px] uppercase tracking-widest font-montserrat"
+              className="text-[#032F73] text-[10px] lg:text-[11px] uppercase tracking-widest font-montserrat mt-1"
               style={{
                 fontFamily: "'Montserrat', sans-serif",
                 fontWeight: 800,
-                letterSpacing: '0.05em',
+                letterSpacing: '0.06em',
               }}
             >
               WORKSHOP & FABRICATION
@@ -162,8 +162,8 @@ export const WeldingShopLogo: React.FC<LogoProps> = ({
 
       {/* Hover upload badge */}
       {onClickUpload && (
-        <div className="absolute -top-1.5 -right-1.5 bg-[#EA7A2D] text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm">
-          <Camera className="w-2.5 h-2.5" />
+        <div className="absolute -top-1.5 -right-1.5 bg-[#EA7A2D] text-white p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm">
+          <Camera className="w-3 h-3" />
         </div>
       )}
     </div>

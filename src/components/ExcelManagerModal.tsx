@@ -1,8 +1,20 @@
 import React, { useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { JobItem } from '../types';
+import { JobItem, BrandingImages, SyncStatusType } from '../types';
 import { INITIAL_JOBS, DEMO_EXTENDED_JOBS } from '../data/initialJobs';
-import { X, Upload, Download, FileSpreadsheet, Check, AlertCircle, RefreshCw } from 'lucide-react';
+import {
+  X,
+  Upload,
+  Download,
+  FileSpreadsheet,
+  Check,
+  AlertCircle,
+  RefreshCw,
+  Database,
+  Cloud,
+  FileJson,
+  ShieldCheck,
+} from 'lucide-react';
 
 interface ExcelManagerModalProps {
   isOpen: boolean;
@@ -10,6 +22,11 @@ interface ExcelManagerModalProps {
   currentJobs: JobItem[];
   onImportJobs: (jobs: JobItem[]) => void;
   onResetToDefault: () => void;
+  branding?: BrandingImages;
+  onImportBackupJson?: (data: any) => void;
+  onExportBackupJson?: () => void;
+  onForceSaveServer?: () => void;
+  syncStatus?: SyncStatusType;
 }
 
 export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
@@ -18,11 +35,17 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
   currentJobs,
   onImportJobs,
   onResetToDefault,
+  onImportBackupJson,
+  onExportBackupJson,
+  onForceSaveServer,
+  syncStatus = 'connected',
 }) => {
+  const [activeTab, setActiveTab] = useState<'excel' | 'backup'>('backup');
   const [dragOver, setDragOver] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const jsonFileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -47,7 +70,6 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
 
         // Map various column name representations to JobItem
         const parsedJobs: JobItem[] = jsonData.map((row, idx) => {
-          // Normalize keys to lowercase trimmed
           const normalized: Record<string, unknown> = {};
           Object.keys(row).forEach((k) => {
             normalized[k.trim().toLowerCase()] = row[k];
@@ -71,6 +93,17 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
               normalized['unit'] ||
               'Workshop'
           );
+
+          const pic = String(
+            normalized['pic'] ||
+              normalized['pic (nama)'] ||
+              normalized['nama pic'] ||
+              normalized['pic nama'] ||
+              normalized['penanggung jawab'] ||
+              normalized['person in charge'] ||
+              normalized['nama'] ||
+              ''
+          ).trim();
 
           const start = String(
             normalized['start'] ||
@@ -101,101 +134,164 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
             0;
 
           const rawActual =
-            normalized['actual_schedule'] ??
-            normalized['actual schedule'] ??
-            normalized['schedule_actual'] ??
             normalized['progress_actual'] ??
+            normalized['actual_progress'] ??
             normalized['progress actual'] ??
+            normalized['actual progress'] ??
             normalized['actual'] ??
             normalized['realisasi'] ??
             0;
 
-          const progress_target = typeof rawTarget === 'number' ? rawTarget : parseFloat(String(rawTarget).replace('%', '')) || 0;
-          const progress_actual = typeof rawActual === 'number' ? rawActual : parseFloat(String(rawActual).replace('%', '')) || 0;
+          const parsePct = (val: unknown): number => {
+            if (typeof val === 'number') {
+              return val <= 1 && val > 0 ? Number((val * 100).toFixed(2)) : Number(val.toFixed(2));
+            }
+            if (typeof val === 'string') {
+              const clean = val.replace('%', '').trim().replace(',', '.');
+              const num = parseFloat(clean);
+              return isNaN(num) ? 0 : Number(num.toFixed(2));
+            }
+            return 0;
+          };
 
-          const status = String(
-            normalized['status'] || (progress_actual >= 100 ? 'SELESAI' : 'AKTIF')
-          );
+          const rawStatus = String(normalized['status'] || '').toUpperCase();
+          let status: 'AKTIF' | 'SELESAI' = 'AKTIF';
+          if (rawStatus.includes('SELESAI') || rawStatus.includes('DONE') || rawStatus.includes('COMPLETE')) {
+            status = 'SELESAI';
+          }
+
+          const parsedActual = parsePct(rawActual);
+          if (parsedActual >= 100) {
+            status = 'SELESAI';
+          }
 
           return {
-            id: Number(normalized['id']) || idx + 1,
+            id: Number(normalized['no'] || normalized['id'] || idx + 1),
             deskripsi,
             area,
+            pic: pic || undefined,
             start,
             finish,
-            progress_target,
-            progress_actual,
+            progress_target: parsePct(rawTarget),
+            progress_actual: parsedActual,
             status,
           };
         });
 
-        onImportJobs(parsedJobs);
-        setSuccessMessage(`Berhasil mengimpor ${parsedJobs.length} pekerjaan dari file Excel!`);
-        setTimeout(() => {
-          onClose();
-        }, 1200);
-      } catch (err) {
-        console.error(err);
-        setErrorMessage('Gagal memproses file Excel. Pastikan format file adalah .xlsx atau .xls.');
+        if (parsedJobs.length > 0) {
+          onImportJobs(parsedJobs);
+          setSuccessMessage(
+            `Berhasil memuat ${parsedJobs.length} data pekerjaan dari file Excel!`
+          );
+          setTimeout(() => {
+            onClose();
+          }, 1200);
+        } else {
+          setErrorMessage('Tidak ada data yang cocok dengan format pekerjaan Welding Shop.');
+        }
+      } catch (err: any) {
+        console.error('Excel parse error:', err);
+        setErrorMessage(`Gagal membaca file Excel: ${err.message || 'Format tidak dikenali'}`);
       }
-    };
-
-    reader.onerror = () => {
-      setErrorMessage('Terjadi kesalahan saat membaca file.');
     };
 
     reader.readAsArrayBuffer(file);
   };
 
+  // Process JSON Backup file
+  const processJsonBackupFile = (file: File) => {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const parsed = JSON.parse(text);
+
+        if (!parsed || typeof parsed !== 'object') {
+          setErrorMessage('Format berkas backup JSON tidak valid.');
+          return;
+        }
+
+        if (onImportBackupJson) {
+          onImportBackupJson(parsed);
+          setSuccessMessage('Cadangan lengkap (.json) berhasil dipulihkan!');
+          setTimeout(() => {
+            onClose();
+          }, 1200);
+        }
+      } catch (err: any) {
+        console.error('JSON parse error:', err);
+        setErrorMessage(`Gagal membaca berkas cadangan: ${err.message || 'File JSON rusak'}`);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      processExcelFile(e.dataTransfer.files[0]);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (activeTab === 'excel') {
+        processExcelFile(file);
+      } else {
+        processJsonBackupFile(file);
+      }
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
+    if (e.target.files && e.target.files.length > 0) {
       processExcelFile(e.target.files[0]);
     }
   };
 
-  // Export current jobs as DASHBOARD WS.xlsx
+  const handleJsonFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processJsonBackupFile(e.target.files[0]);
+    }
+  };
+
+  // Export current jobs to Excel
   const handleExportExcel = () => {
     try {
-      const exportData = currentJobs.map((job) => ({
-        id: job.id,
-        deskripsi: job.deskripsi,
-        area: job.area,
-        start: job.start,
-        finish: job.finish,
-        progress_target: job.progress_target,
-        progress_actual: job.progress_actual,
-        status: job.status,
+      const exportData = currentJobs.map((j, idx) => ({
+        NO: idx + 1,
+        'DESKRIPSI PEKERJAAN': j.deskripsi,
+        AREA: j.area,
+        'PIC (NAMA)': j.pic || '-',
+        START: j.start,
+        FINISH: j.finish,
+        'TARGET SCHEDULE (%)': j.progress_target,
+        'PROGRESS ACTUAL (%)': j.progress_actual,
+        STATUS: j.status,
       }));
 
       const worksheet = XLSX.utils.json_to_sheet(exportData);
 
-      // Auto-fit column widths
       worksheet['!cols'] = [
-        { wch: 6 }, // id
-        { wch: 50 }, // deskripsi
-        { wch: 16 }, // area
-        { wch: 20 }, // start
-        { wch: 20 }, // finish
-        { wch: 16 }, // progress_target
-        { wch: 16 }, // progress_actual
-        { wch: 12 }, // status
+        { wch: 6 },
+        { wch: 45 },
+        { wch: 15 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 18 },
+        { wch: 22 },
+        { wch: 22 },
+        { wch: 12 },
       ];
 
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'DASHBOARD WS');
+
       XLSX.writeFile(workbook, 'DASHBOARD WS.xlsx');
-      setSuccessMessage('File "DASHBOARD WS.xlsx" berhasil diunduh!');
-    } catch (err) {
-      console.error(err);
-      setErrorMessage('Gagal mengekspor file Excel.');
+      setSuccessMessage('File DASHBOARD WS.xlsx berhasil diunduh!');
+    } catch (err: any) {
+      console.error('Export error:', err);
+      setErrorMessage(`Gagal mengunduh Excel: ${err.message}`);
     }
   };
 
@@ -212,14 +308,20 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
         <div className="flex items-center justify-between border-b border-blue-800 pb-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-600/90 flex items-center justify-center shadow-md">
-              <FileSpreadsheet className="w-6 h-6 text-white" />
+              {activeTab === 'excel' ? (
+                <FileSpreadsheet className="w-6 h-6 text-white" />
+              ) : (
+                <Database className="w-6 h-6 text-white" />
+              )}
             </div>
             <div>
               <h2 className="text-xl font-black text-yellow-400 uppercase tracking-wide">
-                Kelola Data Excel (SheetJS)
+                {activeTab === 'excel' ? 'Kelola Data Excel (SheetJS)' : 'Cadangan & Sinkronisasi Server'}
               </h2>
               <p className="text-blue-200 text-xs">
-                Import / Export file spreadsheet `DASHBOARD WS.xlsx`
+                {activeTab === 'excel'
+                  ? 'Import / Export file spreadsheet DASHBOARD WS.xlsx'
+                  : 'Pertahankan semua data & gambar di preview, server cloud, & komputer lain'}
               </p>
             </div>
           </div>
@@ -228,6 +330,34 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
             className="p-1.5 rounded-lg bg-blue-900/60 hover:bg-rose-800 text-blue-200 hover:text-white transition-colors"
           >
             <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Tab Navigation */}
+        <div className="flex border-b border-blue-800/80 gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab('excel')}
+            className={`flex items-center gap-2 pb-2 px-3 text-xs font-black uppercase tracking-wider transition-colors border-b-2 ${
+              activeTab === 'excel'
+                ? 'border-yellow-400 text-yellow-300'
+                : 'border-transparent text-blue-300 hover:text-white'
+            }`}
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Excel (.xlsx)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('backup')}
+            className={`flex items-center gap-2 pb-2 px-3 text-xs font-black uppercase tracking-wider transition-colors border-b-2 ${
+              activeTab === 'backup'
+                ? 'border-yellow-400 text-yellow-300'
+                : 'border-transparent text-blue-300 hover:text-white'
+            }`}
+          >
+            <Database className="w-4 h-4" />
+            <span>Cadangan Lengkap & Server (.json)</span>
           </button>
         </div>
 
@@ -245,72 +375,187 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
           </div>
         )}
 
-        {/* Drag and Drop Zone */}
-        <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-xl p-6 text-center flex flex-col items-center justify-center cursor-pointer transition-all ${
-            dragOver
-              ? 'border-yellow-400 bg-blue-900/50 scale-[1.01]'
-              : 'border-blue-600/70 bg-blue-950/50 hover:border-yellow-400 hover:bg-blue-900/30'
-          }`}
-        >
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            accept=".xlsx, .xls"
-            className="hidden"
-          />
-          <Upload className="w-10 h-10 text-yellow-400 mb-2 animate-bounce" />
-          <p className="text-sm font-bold text-white">
-            Tarik & Lepaskan file <span className="text-yellow-300 font-mono">DASHBOARD WS.xlsx</span> ke sini
-          </p>
-          <p className="text-xs text-blue-300 mt-1">atau klik untuk memilih file dari komputer</p>
-          <span className="mt-3 text-[10px] text-blue-400 bg-blue-900/80 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-            Mendukung .xlsx & .xls
-          </span>
-        </div>
+        {/* TAB 1: EXCEL */}
+        {activeTab === 'excel' && (
+          <>
+            {/* Drag and Drop Zone Excel */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`border-2 border-dashed rounded-xl p-6 text-center flex flex-col items-center justify-center cursor-pointer transition-all ${
+                dragOver
+                  ? 'border-yellow-400 bg-blue-900/50 scale-[1.01]'
+                  : 'border-blue-600/70 bg-blue-950/50 hover:border-yellow-400 hover:bg-blue-900/30'
+              }`}
+            >
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept=".xlsx, .xls"
+                className="hidden"
+              />
+              <Upload className="w-10 h-10 text-yellow-400 mb-2 animate-bounce" />
+              <p className="text-sm font-bold text-white">
+                Tarik & Lepaskan file <span className="text-yellow-300 font-mono">DASHBOARD WS.xlsx</span> ke sini
+              </p>
+              <p className="text-xs text-blue-300 mt-1">atau klik untuk memilih file dari komputer</p>
+              <span className="mt-3 text-[10px] text-blue-400 bg-blue-900/80 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                Mendukung .xlsx & .xls
+              </span>
+            </div>
 
-        {/* Quick Presets & Export Actions */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-blue-800/80">
-          <button
-            onClick={handleExportExcel}
-            className="flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-2 px-3 rounded-xl text-xs transition-colors shadow"
-          >
-            <Download className="w-4 h-4" />
-            <span>Export DASHBOARD WS.xlsx</span>
-          </button>
+            {/* Quick Presets & Export Actions */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-blue-800/80">
+              <button
+                onClick={handleExportExcel}
+                className="flex items-center justify-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-2 px-3 rounded-xl text-xs transition-colors shadow"
+              >
+                <Download className="w-4 h-4" />
+                <span>Export DASHBOARD WS.xlsx</span>
+              </button>
 
-          <button
-            onClick={() => {
-              onImportJobs(INITIAL_JOBS);
-              setSuccessMessage(`Data dimuat ke ${INITIAL_JOBS.length} pekerjaan default!`);
-              setTimeout(onClose, 800);
-            }}
-            className="flex items-center justify-center gap-2 bg-blue-800 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-xl text-xs transition-colors shadow"
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span>Load Data Default ({INITIAL_JOBS.length} Job)</span>
-          </button>
+              <button
+                onClick={() => {
+                  onImportJobs(INITIAL_JOBS);
+                  setSuccessMessage(`Data dimuat ke ${INITIAL_JOBS.length} pekerjaan default!`);
+                  setTimeout(onClose, 800);
+                }}
+                className="flex items-center justify-center gap-2 bg-blue-800 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-xl text-xs transition-colors shadow"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Load Default ({INITIAL_JOBS.length} Job)</span>
+              </button>
 
-          <button
-            onClick={() => {
-              onImportJobs(DEMO_EXTENDED_JOBS);
-              setSuccessMessage('Data contoh (8 pekerjaan) dimuat untuk uji rotasi auto-scroll!');
-              setTimeout(onClose, 800);
-            }}
-            className="flex items-center justify-center gap-2 bg-amber-700 hover:bg-amber-600 text-white font-bold py-2 px-3 rounded-xl text-xs transition-colors shadow"
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span>Load Demo (8 Job & Carousel)</span>
-          </button>
-        </div>
+              <button
+                onClick={() => {
+                  onImportJobs(DEMO_EXTENDED_JOBS);
+                  setSuccessMessage('Data contoh (8 pekerjaan) dimuat untuk uji rotasi!');
+                  setTimeout(onClose, 800);
+                }}
+                className="flex items-center justify-center gap-2 bg-amber-700 hover:bg-amber-600 text-white font-bold py-2 px-3 rounded-xl text-xs transition-colors shadow"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Load Demo (8 Job)</span>
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* TAB 2: BACKUP LENGKAP & SERVER */}
+        {activeTab === 'backup' && (
+          <div className="flex flex-col gap-3">
+            {/* Status Box */}
+            <div className="p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-500/80 flex items-start gap-3">
+              <ShieldCheck className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+              <div className="text-xs">
+                <div className="font-black text-emerald-300 uppercase tracking-wide">
+                  Perlindungan Data Lintas Komputer & Publish Aktif
+                </div>
+                <p className="text-emerald-100/90 mt-1 leading-relaxed">
+                  Semua data pekerjaan, logo PT Pupuk Kaltim, logo Welding Shop, dan poster K3 tersimpan otomatis di server backend.
+                  Saat web app ini <strong>di-publish</strong> atau dibuka di <strong>komputer/layar TV yang berbeda</strong>, data akan langsung dimuat secara konsisten.
+                </p>
+              </div>
+            </div>
+
+            {/* Actions Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              {/* Unduh Cadangan JSON */}
+              <div className="p-4 rounded-xl bg-blue-950/60 border border-blue-700/70 flex flex-col gap-2">
+                <div className="flex items-center gap-2 text-yellow-300 font-bold text-xs">
+                  <FileJson className="w-4 h-4" />
+                  <span>Unduh File Cadangan (.json)</span>
+                </div>
+                <p className="text-[11px] text-blue-200">
+                  Menyimpan seluruh pekerjaan, <strong>semua arsip selesai/dihapus</strong>, PIN, dan gambar logo/poster ke dalam 1 file cadangan portabel.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onExportBackupJson) {
+                      onExportBackupJson();
+                      setSuccessMessage('File cadangan lengkap (.json) berhasil diunduh!');
+                    }
+                  }}
+                  className="mt-auto flex items-center justify-center gap-2 bg-[#EA7A2D] hover:bg-amber-600 text-white font-bold py-2 px-3 rounded-lg text-xs transition-colors shadow-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Unduh Cadangan (.json)</span>
+                </button>
+              </div>
+
+              {/* Pulihkan Cadangan JSON */}
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOver(true);
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+                onClick={() => jsonFileInputRef.current?.click()}
+                className={`p-4 rounded-xl border-2 border-dashed flex flex-col gap-2 cursor-pointer transition-all ${
+                  dragOver
+                    ? 'border-yellow-400 bg-blue-900/50'
+                    : 'border-blue-600/70 bg-blue-950/60 hover:border-yellow-400'
+                }`}
+              >
+                <input
+                  type="file"
+                  ref={jsonFileInputRef}
+                  onChange={handleJsonFileChange}
+                  accept=".json"
+                  className="hidden"
+                />
+                <div className="flex items-center gap-2 text-yellow-300 font-bold text-xs">
+                  <Upload className="w-4 h-4" />
+                  <span>Pulihkan dari File (.json)</span>
+                </div>
+                <p className="text-[11px] text-blue-200">
+                  Pilih atau seret file <span className="font-mono text-yellow-300">.json</span> cadangan (atau hasil simpan dari <span className="font-mono text-yellow-300">/api/state</span>) untuk memulihkan semua pekerjaan, arsip &amp; gambar.
+                </p>
+                <div className="mt-auto text-center py-1.5 px-2 rounded-lg bg-blue-900/80 hover:bg-blue-800 text-white font-bold text-xs">
+                  Pilih File Cadangan...
+                </div>
+              </div>
+            </div>
+
+            {/* Simpan Paksa ke Server */}
+            <div className="pt-2 border-t border-blue-800 flex items-center justify-between">
+              <div className="text-[11px] text-blue-200 flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5 text-emerald-400" />
+                <span>
+                  Status server:{' '}
+                  <span className={`font-bold ${syncStatus === 'offline' ? 'text-rose-400' : 'text-emerald-300'}`}>
+                    {syncStatus === 'saving'
+                      ? 'Menyimpan...'
+                      : syncStatus === 'offline'
+                      ? 'Terputus (Offline)'
+                      : 'Aktif & Sinkron (Real-Time)'}
+                  </span>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onForceSaveServer) {
+                    onForceSaveServer();
+                    setSuccessMessage('Data & seluruh gambar berhasil dikirim & disimpan di server!');
+                  }
+                }}
+                className="flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition-colors shadow-xs"
+              >
+                <Cloud className="w-3.5 h-3.5" />
+                <span>Simpan ke Server Sekarang</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
