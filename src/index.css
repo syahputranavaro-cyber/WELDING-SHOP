@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+:root {
+  --brand-navy: #032F73;
+  --brand-navy-deep: #022154;
+  --brand-orange: #EA7A2D;
+  --brand-orange-hover: #D96B1F;
+  --brand-blue: #1054C1;
+  --surface-canvas: #EFF3F8;
+  --surface-card: #FFFFFF;
+}
+
 *, ::before, ::after {
   box-sizing: border-box;
 }
@@ -13,34 +23,39 @@ html, body, #root {
   margin: 0;
   padding: 0;
   overflow: hidden;
+  background-color: var(--surface-canvas);
 }
 
 @layer base {
   html, body {
-    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-weight: 600;
-    letter-spacing: 0.015em;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-weight: 500;
+    color: #0F172A;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  button:not(:disabled) {
+    cursor: pointer;
   }
 }
 
-/* Specific Font Family Classes */
-.font-montserrat {
-  font-family: 'Montserrat', system-ui, -apple-system, sans-serif;
-  letter-spacing: 0.05em;
+/* Brand & Data Typography Utilities */
+.font-display {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
 }
 
 .font-oswald {
-  font-family: 'Oswald', 'Inter', system-ui, sans-serif;
+  font-family: 'Oswald', 'Plus Jakarta Sans', system-ui, sans-serif;
 }
 
-.font-inter {
-  font-family: 'Inter', system-ui, sans-serif;
-  letter-spacing: 0.015em;
+.font-mono-data {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Tabular Numbers for Date, Percentages, and Numerical Metrics */
+/* Tabular Numbers for Dates, Clocks, Percentages, and Counts */
 .tabular-nums,
 .font-tabular {
   font-variant-numeric: tabular-nums;
@@ -49,3 +64,21 @@ html, body, #root {
   font-feature-settings: "tnum";
 }
 
+/* Subtle Custom Scrollbar for Table & Modals */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(3, 47, 115, 0.18);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(3, 47, 115, 0.34);
+}

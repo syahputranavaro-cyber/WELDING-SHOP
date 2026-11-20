@@ -1,88 +1,232 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { User, onAuthStateChanged, signInWithPopup, signOut as firebaseSignOut } from 'firebase/auth';
-import { auth, googleAuthProvider } from '../lib/firebase';
 import { setAuthTokenProvider } from '../utils/syncService';
 
+export type UserRole = 'admin' | 'guest';
+
+export interface LocalUser {
+  email: string;
+  displayName: string;
+  role: UserRole;
+  loggedInAt: string;
+  token?: string;
+  expiresAt?: string;
+}
+
 interface AuthContextValue {
-  user: User | null;
+  user: LocalUser | null;
+  isGuest: boolean;
   loading: boolean;
   authError: string | null;
-  signInWithGoogle: () => Promise<void>;
+  signInWithLocalAccount: (
+    email: string,
+    password: string,
+    remember?: boolean
+  ) => Promise<boolean>;
+  signInAsGuest: () => void;
   signOut: () => Promise<void>;
-  getIdToken: () => Promise<string | null>;
+  clearAuthError: () => void;
 }
+
+const SESSION_STORAGE_KEY = 'welding_shop_local_session_v1';
 
 const AuthContext = createContext<AuthContextValue>({
   user: null,
+  isGuest: false,
   loading: true,
   authError: null,
-  signInWithGoogle: async () => {},
+  signInWithLocalAccount: async () => false,
+  signInAsGuest: () => {},
   signOut: async () => {},
-  getIdToken: async () => null,
+  clearAuthError: () => {},
 });
 
+function clearStoredSession() {
+  try {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function readStoredSession(): LocalUser | null {
+  for (const storage of [localStorage, sessionStorage]) {
+    try {
+      const raw = storage.getItem(SESSION_STORAGE_KEY);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') continue;
+
+      if (parsed.role === 'guest') {
+        return {
+          email: 'tamu@welding.local',
+          displayName: 'Tamu (View Only)',
+          role: 'guest',
+          loggedInAt: parsed.loggedInAt || new Date().toISOString(),
+        };
+      }
+
+      if (
+        parsed.role === 'admin' &&
+        typeof parsed.email === 'string' &&
+        typeof parsed.token === 'string' &&
+        parsed.token.length > 10
+      ) {
+        if (parsed.expiresAt && new Date(parsed.expiresAt).getTime() <= Date.now()) {
+          clearStoredSession();
+          return null;
+        }
+        return {
+          email: parsed.email,
+          displayName: parsed.displayName || 'Admin Welding Shop',
+          role: 'admin',
+          loggedInAt: parsed.loggedInAt || new Date().toISOString(),
+          token: parsed.token,
+          expiresAt: parsed.expiresAt,
+        };
+      }
+
+      // Sesi admin lama tanpa server token: bersihkan agar admin login sekali untuk memperoleh Bearer token
+      clearStoredSession();
+    } catch {
+      // ignore storage errors
+    }
+  }
+  return null;
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<LocalUser | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
-  const userRef = useRef<User | null>(null);
-
-  const getIdToken = useCallback(async (): Promise<string | null> => {
-    const currentUser = userRef.current || auth.currentUser;
-    if (!currentUser) return null;
-    try {
-      return await currentUser.getIdToken();
-    } catch (err) {
-      console.error('Failed to retrieve ID token:', err);
-      return null;
-    }
-  }, []);
+  const tokenRef = useRef<string | null>(null);
 
   useEffect(() => {
-    setAuthTokenProvider(getIdToken);
-  }, [getIdToken]);
+    setAuthTokenProvider(async () => tokenRef.current);
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      userRef.current = firebaseUser;
-      setUser(firebaseUser);
+    const existing = readStoredSession();
+    if (existing?.role === 'admin' && existing.token) {
+      tokenRef.current = existing.token;
+      setUser(existing);
       setLoading(false);
-    });
-    return () => unsubscribe();
+
+      // Verifikasi token secara silent ke server agar token invalid/expired langsung ditangani
+      fetch('/api/auth/verify', {
+        cache: 'no-store',
+        headers: { Authorization: `Bearer ${existing.token}` },
+      })
+        .then((res) => {
+          if (res.status === 401) {
+            tokenRef.current = null;
+            clearStoredSession();
+            setUser(null);
+            setAuthError('Sesi Admin telah berakhir. Silakan login kembali.');
+          }
+        })
+        .catch(() => {
+          // Abaikan error jaringan sementara
+        });
+      return;
+    }
+
+    tokenRef.current = null;
+    setUser(existing);
+    setLoading(false);
   }, []);
 
-  const signInWithGoogle = useCallback(async () => {
+  const clearAuthError = useCallback(() => {
     setAuthError(null);
-    try {
-      await signInWithPopup(auth, googleAuthProvider);
-    } catch (err: any) {
-      console.error('Google Sign-In failed:', err);
-      if (err?.code === 'auth/popup-closed-by-user') {
-        setAuthError('Jendela login ditutup sebelum selesai. Silakan coba lagi.');
-      } else {
-        setAuthError('Gagal masuk dengan akun Google. Pastikan pop-up browser tidak diblokir.');
+  }, []);
+
+  const signInWithLocalAccount = useCallback(
+    async (email: string, password: string, remember: boolean = true): Promise<boolean> => {
+      setAuthError(null);
+
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail || !password) {
+        setAuthError('Email dan password wajib diisi.');
+        return false;
       }
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normalizedEmail, password }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.success || !data?.token) {
+          setAuthError(data?.message || 'Email atau password salah. Silakan periksa kembali.');
+          return false;
+        }
+
+        const sessionUser: LocalUser = {
+          email: data.user?.email || normalizedEmail,
+          displayName: data.user?.displayName || 'Admin Welding Shop',
+          role: 'admin',
+          loggedInAt: new Date().toISOString(),
+          token: data.token,
+          expiresAt: data.expiresAt,
+        };
+
+        tokenRef.current = data.token;
+        clearStoredSession();
+        try {
+          const targetStorage = remember ? localStorage : sessionStorage;
+          targetStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionUser));
+        } catch {
+          // ignore storage quota/private mode errors
+        }
+
+        setUser(sessionUser);
+        return true;
+      } catch {
+        setAuthError('Tidak dapat terhubung ke server autentikasi. Periksa koneksi jaringan.');
+        return false;
+      }
+    },
+    []
+  );
+
+  const signInAsGuest = useCallback(() => {
+    setAuthError(null);
+    tokenRef.current = null;
+    const guestUser: LocalUser = {
+      email: 'tamu@welding.local',
+      displayName: 'Tamu (View Only)',
+      role: 'guest',
+      loggedInAt: new Date().toISOString(),
+    };
+
+    clearStoredSession();
+    try {
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(guestUser));
+    } catch {
+      // ignore storage errors
     }
+
+    setUser(guestUser);
   }, []);
 
   const signOut = useCallback(async () => {
     setAuthError(null);
-    try {
-      await firebaseSignOut(auth);
-    } catch (err) {
-      console.error('Sign out failed:', err);
-    }
+    tokenRef.current = null;
+    clearStoredSession();
+    setUser(null);
   }, []);
 
   return (
     <AuthContext.Provider
       value={{
         user,
+        isGuest: user?.role === 'guest',
         loading,
         authError,
-        signInWithGoogle,
+        signInWithLocalAccount,
+        signInAsGuest,
         signOut,
-        getIdToken,
+        clearAuthError,
       }}
     >
       {children}

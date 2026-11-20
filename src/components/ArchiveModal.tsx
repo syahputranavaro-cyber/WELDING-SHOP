@@ -8,11 +8,8 @@ import {
   Trash2,
   RotateCcw,
   Search,
-  Download,
   Calendar,
-  Clock,
   User,
-  MapPin,
   AlertTriangle,
   FolderArchive,
   FileSpreadsheet,
@@ -27,6 +24,7 @@ interface ArchiveModalProps {
   onPermanentDeleteJob: (item: ArchivedJobItem) => void;
   onClearArchive?: (type: 'FINISH' | 'DELETED' | 'ALL') => void;
   initialTab?: 'finish' | 'deleted';
+  isReadOnly?: boolean;
 }
 
 export const ArchiveModal: React.FC<ArchiveModalProps> = ({
@@ -36,8 +34,8 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
   archiveDeleted = [],
   onRestoreJob,
   onPermanentDeleteJob,
-  onClearArchive,
   initialTab = 'finish',
+  isReadOnly = false,
 }) => {
   const [activeTab, setActiveTab] = useState<'finish' | 'deleted'>(initialTab);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -60,7 +58,6 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Format date helper for archive timestamp
   const formatArchiveDate = (isoOrText: string) => {
     try {
       const d = new Date(isoOrText);
@@ -77,12 +74,10 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
     }
   };
 
-  // Export Archive to Excel
   const handleExportArchiveExcel = () => {
     try {
       const wb = XLSX.utils.book_new();
 
-      // Sheet 1: Finish Jobs
       const finishRows = archiveFinish.map((item, idx) => ({
         No: idx + 1,
         'Deskripsi Pekerjaan': item.deskripsi,
@@ -98,7 +93,6 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
       const wsFinish = XLSX.utils.json_to_sheet(finishRows);
       XLSX.utils.book_append_sheet(wb, wsFinish, 'Pekerjaan Selesai (Finish)');
 
-      // Sheet 2: Deleted Jobs
       const deletedRows = archiveDeleted.map((item, idx) => ({
         No: idx + 1,
         'Deskripsi Pekerjaan': item.deskripsi,
@@ -124,27 +118,27 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
   return (
     <div
       id="archive-data-modal-overlay"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-xs p-3 sm:p-5 animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-3 sm:p-5 animate-in fade-in duration-150"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
         id="archive-data-modal-container"
-        className="w-full max-w-5xl bg-white rounded-2xl shadow-2xl border-2 border-slate-200 overflow-hidden flex flex-col max-h-[92vh] h-[88vh]"
+        className="w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-slate-200/90 overflow-hidden flex flex-col max-h-[92vh] h-[88vh]"
       >
         {/* Header Modal */}
-        <div className="bg-[#032F73] text-white px-6 py-4 flex items-center justify-between border-b-2 border-blue-900 flex-shrink-0">
+        <div className="bg-[#032F73] text-white px-6 py-4 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shadow-md flex-shrink-0">
-              <FolderArchive className="w-6 h-6" />
+            <div className="w-9 h-9 rounded-xl bg-white/10 text-[#EA7A2D] flex items-center justify-center flex-shrink-0">
+              <FolderArchive className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg sm:text-xl font-black tracking-wide font-inter">
+              <h2 className="text-base sm:text-lg font-bold tracking-tight">
                 Arsip Data Pekerjaan
               </h2>
-              <p className="text-xs text-blue-200 font-medium">
-                Penyimpanan riwayat pekerjaan yang dipisahkan antara <strong>Selesai (Finish)</strong> dan <strong>Dihapus</strong>
+              <p className="text-xs text-blue-200/90 font-normal">
+                Riwayat pekerjaan yang telah selesai (Finish) dan yang dihapus dari dashboard
               </p>
             </div>
           </div>
@@ -153,7 +147,7 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
             <button
               type="button"
               onClick={handleExportArchiveExcel}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-xs transition-colors"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors"
               title="Unduh Riwayat Arsip ke File Excel (.xlsx)"
             >
               <FileSpreadsheet className="w-4 h-4" />
@@ -161,36 +155,32 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
               title="Tutup Modal"
+              aria-label="Tutup modal"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Tab Selection Bar: Selesai vs Dihapus */}
-        <div className="flex items-center justify-between px-6 pt-3 pb-2 bg-slate-50 border-b border-slate-200 flex-shrink-0 gap-4 flex-wrap">
-          {/* Dua Tab Utama yang Dipisahkan Jelas */}
-          <div className="flex items-center gap-2 bg-slate-200/80 p-1 rounded-xl">
+        {/* Tab Selection Bar & Search */}
+        <div className="flex items-center justify-between px-6 py-3 bg-[#F8FAFC] border-b border-slate-200/80 flex-shrink-0 gap-4 flex-wrap">
+          <div className="flex items-center gap-1 bg-slate-200/70 p-1 rounded-xl">
             <button
               type="button"
               id="tab-archive-finish"
               onClick={() => setActiveTab('finish')}
-              className={`flex items-center gap-2 py-2 px-4 rounded-lg text-xs sm:text-sm font-black transition-all ${
+              className={`flex items-center gap-2 py-1.5 px-3.5 rounded-lg text-xs sm:text-[13px] font-semibold transition-all whitespace-nowrap ${
                 activeTab === 'finish'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  ? 'bg-white text-[#032F73] shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Pekerjaan Selesai (Finish)</span>
-              <span
-                className={`ml-1 px-2 py-0.5 rounded-full text-xs font-black tabular-nums ${
-                  activeTab === 'finish' ? 'bg-white/25 text-white' : 'bg-slate-300 text-slate-700'
-                }`}
-              >
-                {archiveFinish.length}
+              <CheckCircle2 className={`w-4 h-4 ${activeTab === 'finish' ? 'text-emerald-600' : 'text-slate-400'}`} />
+              <span>Selesai (Finish)</span>
+              <span className="font-mono-data text-xs text-slate-400 tabular-nums">
+                ({archiveFinish.length})
               </span>
             </button>
 
@@ -198,25 +188,20 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
               type="button"
               id="tab-archive-deleted"
               onClick={() => setActiveTab('deleted')}
-              className={`flex items-center gap-2 py-2 px-4 rounded-lg text-xs sm:text-sm font-black transition-all ${
+              className={`flex items-center gap-2 py-1.5 px-3.5 rounded-lg text-xs sm:text-[13px] font-semibold transition-all whitespace-nowrap ${
                 activeTab === 'deleted'
-                  ? 'bg-rose-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  ? 'bg-white text-[#032F73] shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Trash2 className="w-4 h-4" />
-              <span>Pekerjaan Dihapus</span>
-              <span
-                className={`ml-1 px-2 py-0.5 rounded-full text-xs font-black tabular-nums ${
-                  activeTab === 'deleted' ? 'bg-white/25 text-white' : 'bg-slate-300 text-slate-700'
-                }`}
-              >
-                {archiveDeleted.length}
+              <Trash2 className={`w-4 h-4 ${activeTab === 'deleted' ? 'text-rose-600' : 'text-slate-400'}`} />
+              <span>Dihapus</span>
+              <span className="font-mono-data text-xs text-slate-400 tabular-nums">
+                ({archiveDeleted.length})
               </span>
             </button>
           </div>
 
-          {/* Search Box */}
           <div className="relative min-w-[200px] sm:min-w-[260px] flex-1 sm:flex-initial">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -224,7 +209,7 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Cari deskripsi, area, atau PIC..."
-              className="w-full text-xs font-bold pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-[#032F73]"
+              className="w-full text-xs font-medium pl-9 pr-7 py-2 bg-white border border-slate-300 rounded-xl focus:outline-none focus:border-[#032F73] focus:ring-2 focus:ring-[#032F73]/15 transition-all"
             />
             {searchQuery && (
               <button
@@ -239,125 +224,115 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
         </div>
 
         {/* Content Table Area */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 bg-[#F8FAFC]">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 bg-[#EFF3F8]">
           {filteredList.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center p-8 border-2 border-dashed border-slate-300 rounded-2xl bg-white">
+            <div className="h-full flex flex-col items-center justify-center text-center p-8 border border-slate-200/90 rounded-xl bg-white">
               <div
-                className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-3 shadow-inner ${
+                className={`w-12 h-12 rounded-xl flex items-center justify-center mb-3 ${
                   activeTab === 'finish' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
                 }`}
               >
-                {activeTab === 'finish' ? <CheckCircle2 className="w-7 h-7" /> : <Archive className="w-7 h-7" />}
+                {activeTab === 'finish' ? <CheckCircle2 className="w-6 h-6" /> : <Archive className="w-6 h-6" />}
               </div>
-              <h3 className="text-base font-black text-slate-800 mb-1">
+              <h3 className="text-sm font-bold text-slate-800 mb-1">
                 {searchQuery
                   ? 'Tidak ada data arsip yang cocok'
                   : activeTab === 'finish'
-                  ? 'Belum Ada Pekerjaan Selesai (Finish)'
+                  ? 'Belum Ada Pekerjaan Selesai'
                   : 'Belum Ada Pekerjaan yang Dihapus'}
               </h3>
-              <p className="text-xs text-slate-500 max-w-md">
+              <p className="text-xs text-slate-500 max-w-md leading-relaxed">
                 {activeTab === 'finish'
-                  ? 'Ketika Anda menandai pekerjaan FINISH di dashboard utama, data otomatis tersimpan rapi di sini dan tidak hilang.'
-                  : 'Ketika pekerjaan dihapus dari dashboard, data dipindahkan ke tab ini sebagai cadangan keamanan.'}
+                  ? 'Pekerjaan yang ditandai Finish di dashboard utama otomatis tersimpan rapi di sini.'
+                  : 'Pekerjaan yang dihapus dari dashboard dipindahkan ke tab ini sebagai cadangan keamanan.'}
               </p>
             </div>
           ) : (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-[#032F73] text-white text-[11px] sm:text-xs font-black uppercase tracking-wider">
+                  <tr className="bg-[#032F73] text-white text-[11px] font-semibold uppercase tracking-wider">
                     <th className="py-2.5 px-3 w-12 text-center">No</th>
                     <th className="py-2.5 px-3">Deskripsi Pekerjaan</th>
-                    <th className="py-2.5 px-3">Area & PIC</th>
+                    <th className="py-2.5 px-3">Area &amp; PIC</th>
                     <th className="py-2.5 px-3">Periode</th>
-                    <th className="py-2.5 px-3 text-center">Progress</th>
+                    <th className="py-2.5 px-3 text-right">Actual</th>
                     <th className="py-2.5 px-3">
                       {activeTab === 'finish' ? 'Waktu Selesai' : 'Waktu Dihapus'}
                     </th>
-                    <th className="py-2.5 px-3 text-center w-36">Aksi</th>
+                    {!isReadOnly && <th className="py-2.5 px-3 text-center w-36">Aksi</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200 text-xs font-semibold text-slate-800">
+                <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
                   {filteredList.map((item, idx) => (
-                    <tr key={`${item.id}-${idx}`} className="hover:bg-blue-50/50 transition-colors">
-                      <td className="py-3 px-3 text-center font-black text-slate-500 tabular-nums">
+                    <tr key={`${item.id}-${idx}`} className="hover:bg-[#F8FAFC] transition-colors">
+                      <td className="py-3 px-3 text-center font-mono-data font-semibold text-slate-400 tabular-nums">
                         {idx + 1}
                       </td>
 
-                      {/* Deskripsi */}
                       <td className="py-3 px-3 min-w-[200px] max-w-[280px]">
-                        <p className="font-bold text-slate-900 leading-snug line-clamp-2">
+                        <p className="font-semibold text-slate-900 leading-snug line-clamp-2">
                           {item.deskripsi}
                         </p>
                       </td>
 
-                      {/* Area & PIC */}
                       <td className="py-3 px-3 min-w-[120px]">
-                        <span className="inline-block px-2 py-0.5 rounded bg-blue-100 text-[#032F73] text-[11px] font-black uppercase mb-1">
+                        <div className="text-xs font-bold text-[#032F73] uppercase tracking-wide">
                           {item.area}
-                        </span>
-                        <div className="flex items-center gap-1 text-[11px] text-slate-600 font-medium">
+                        </div>
+                        <div className="flex items-center gap-1 text-[11px] text-slate-500 mt-0.5">
                           <User className="w-3 h-3 text-slate-400" />
                           <span>{item.pic || '-'}</span>
                         </div>
                       </td>
 
-                      {/* Periode */}
-                      <td className="py-3 px-3 min-w-[130px] text-[11px] text-slate-600">
-                        <div>Mulai: {item.start}</div>
-                        <div>Selesai: {item.finish}</div>
+                      <td className="py-3 px-3 min-w-[140px] text-[11px] text-slate-600 tabular-nums">
+                        <div>{item.start}</div>
+                        <div className="text-slate-400">s/d {item.finish}</div>
                       </td>
 
-                      {/* Progress */}
-                      <td className="py-3 px-3 text-center min-w-[90px]">
-                        <span
-                          className={`inline-block px-2 py-1 rounded-md text-[11px] font-black tabular-nums ${
-                            activeTab === 'finish'
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                              : 'bg-slate-100 text-slate-800 border border-slate-300'
-                          }`}
-                        >
-                          Actual: {item.progress_actual.toFixed(1)}%
+                      <td className="py-3 px-3 text-right min-w-[80px] font-mono-data font-bold tabular-nums">
+                        <span className={activeTab === 'finish' ? 'text-emerald-700' : 'text-slate-700'}>
+                          {item.progress_actual.toFixed(1)}%
                         </span>
                       </td>
 
-                      {/* Waktu Arsip */}
-                      <td className="py-3 px-3 min-w-[130px] text-[11px] text-slate-500">
+                      <td className="py-3 px-3 min-w-[140px] text-[11px] text-slate-500 tabular-nums">
                         <div className="flex items-center gap-1">
-                          <Calendar className="w-3 h-3 text-slate-400" />
+                          <Calendar className="w-3 h-3 text-slate-400 flex-shrink-0" />
                           <span>{formatArchiveDate(item.archivedAt)}</span>
                         </div>
                         {item.deleteReason && (
-                          <span className="text-[10px] text-rose-500 italic block mt-0.5">
+                          <span className="text-[10.5px] text-rose-500 block mt-0.5">
                             {item.deleteReason}
                           </span>
                         )}
                       </td>
 
-                      {/* Aksi */}
-                      <td className="py-3 px-3 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => onRestoreJob(item)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#032F73] hover:bg-blue-900 active:scale-95 text-white text-xs font-black shadow-2xs transition-all whitespace-nowrap"
-                            title="Pulihkan pekerjaan ini kembali ke Dashboard Aktif"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            <span>Pulihkan</span>
-                          </button>
+                      {!isReadOnly && (
+                        <td className="py-3 px-3 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => onRestoreJob(item)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#032F73] hover:bg-[#022154] text-white text-xs font-semibold transition-colors whitespace-nowrap"
+                              title="Pulihkan pekerjaan ini kembali ke Dashboard Aktif"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>Pulihkan</span>
+                            </button>
 
-                          <button
-                            type="button"
-                            onClick={() => setItemToDeletePermanently(item)}
-                            className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 transition-colors"
-                            title="Hapus Permanen dari Arsip"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
+                            <button
+                              type="button"
+                              onClick={() => setItemToDeletePermanently(item)}
+                              className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-600 text-rose-600 hover:text-white transition-colors"
+                              title="Hapus Permanen dari Arsip"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -367,34 +342,32 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
         </div>
 
         {/* Footer Modal */}
-        <div className="px-6 py-3 bg-slate-100 border-t border-slate-200 flex items-center justify-end flex-shrink-0 text-xs">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="py-1.5 px-4 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-200 font-bold"
-            >
-              Tutup
-            </button>
-          </div>
+        <div className="px-6 py-3 bg-white border-t border-slate-200/80 flex items-center justify-end flex-shrink-0 text-xs">
+          <button
+            type="button"
+            onClick={onClose}
+            className="py-2 px-4 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold transition-colors"
+          >
+            Tutup
+          </button>
         </div>
 
         {/* Modal Konfirmasi Hapus Permanen */}
         {itemToDeletePermanently && (
-          <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl border-2 border-rose-300">
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/60 p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl border border-slate-200">
               <div className="flex items-center gap-2.5 text-rose-600 mb-2">
-                <AlertTriangle className="w-6 h-6" />
-                <h4 className="font-black text-base">Hapus Permanen?</h4>
+                <AlertTriangle className="w-5 h-5" />
+                <h4 className="font-bold text-base text-slate-900">Hapus Permanen?</h4>
               </div>
-              <p className="text-xs text-slate-600 mb-4">
-                Pekerjaan <strong>"{itemToDeletePermanently.deskripsi}"</strong> akan dihapus permanen dari arsip dan tidak dapat dipulihkan kembali.
+              <p className="text-xs text-slate-600 mb-4 leading-relaxed">
+                Pekerjaan <strong className="text-slate-900">&ldquo;{itemToDeletePermanently.deskripsi}&rdquo;</strong> akan dihapus permanen dari arsip dan tidak dapat dipulihkan kembali.
               </p>
               <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setItemToDeletePermanently(null)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                  className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
                 >
                   Batal
                 </button>
@@ -404,7 +377,7 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
                     onPermanentDeleteJob(itemToDeletePermanently);
                     setItemToDeletePermanently(null);
                   }}
-                  className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-black shadow-xs"
+                  className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold transition-colors"
                 >
                   Ya, Hapus Permanen
                 </button>

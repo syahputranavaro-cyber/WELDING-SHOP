@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { JobItem } from '../types';
+import { JobItem, JobWorkStatus } from '../types';
 import {
   calculateJobTarget,
   formatToISO,
   formatToIndonesian,
+  normalizeWorkStatus,
   parseDate,
 } from '../utils/jobCalculations';
 import {
@@ -13,12 +14,12 @@ import {
   Trash2,
   Calendar,
   Calculator,
-  CheckCircle2,
   Clock,
   MapPin,
   FileText,
   Percent,
   User,
+  Activity,
 } from 'lucide-react';
 
 interface JobEditorModalProps {
@@ -27,7 +28,7 @@ interface JobEditorModalProps {
   jobToEdit: JobItem | null;
   onSaveJob: (job: JobItem, updatedRefDate?: string) => void;
   onDeleteJob?: (id: number) => void;
-  currentDashboardDate: string; // Indonesian or ISO text
+  currentDashboardDate: string;
 }
 
 const COMMON_AREAS = [
@@ -60,8 +61,8 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
   const [isCustomArea, setIsCustomArea] = useState(false);
   const [customAreaText, setCustomAreaText] = useState('');
   const [pic, setPic] = useState('');
+  const [workStatus, setWorkStatus] = useState<JobWorkStatus>('I/P');
 
-  // Dates in ISO YYYY-MM-DD for native HTML5 datepickers
   const [startDate, setStartDate] = useState('2026-09-09');
   const [finishDate, setFinishDate] = useState('2026-09-15');
   const [refDate, setRefDate] = useState('2026-09-09');
@@ -70,7 +71,6 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
   const [manualTargetOverride, setManualTargetOverride] = useState<boolean>(false);
   const [manualTargetValue, setManualTargetValue] = useState<number>(14.29);
 
-  // Sync state whenever modal opens or jobToEdit changes
   useEffect(() => {
     if (!isOpen) return;
 
@@ -80,6 +80,7 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
     if (jobToEdit) {
       setDeskripsi(jobToEdit.deskripsi);
       setPic(jobToEdit.pic || '');
+      setWorkStatus(normalizeWorkStatus(jobToEdit.status));
       const matchedArea = COMMON_AREAS.find(
         (a) => a.toLowerCase() === jobToEdit.area.trim().toLowerCase()
       );
@@ -96,13 +97,12 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
       setManualTargetValue(jobToEdit.progress_target);
       setManualTargetOverride(false);
     } else {
-      // New Job defaults
       setDeskripsi('');
       setArea('Pabrik 1');
       setIsCustomArea(false);
       setCustomAreaText('');
       setPic('');
-      // Default: today to +6 days (total 7 days)
+      setWorkStatus('I/P');
       setStartDate(isoRef);
       const d = parseDate(isoRef) || new Date();
       const finishD = new Date(d.getTime() + 6 * 24 * 60 * 60 * 1000);
@@ -112,7 +112,6 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
     }
   }, [jobToEdit, isOpen, currentDashboardDate]);
 
-  // Real-time calculation using exact formula
   const calculation = useMemo(() => {
     return calculateJobTarget(startDate, finishDate, refDate);
   }, [startDate, finishDate, refDate]);
@@ -145,7 +144,7 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
       finish: formatToIndonesian(finishDate),
       progress_target: Number(effectiveTarget.toFixed(2)),
       progress_actual: Math.min(Math.max(Number(progressActual) || 0, 0), 100),
-      status: Number(progressActual) >= 100 ? 'SELESAI' : 'AKTIF',
+      status: workStatus,
     };
 
     onSaveJob(finalJob, formatToIndonesian(refDate));
@@ -155,27 +154,28 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
   return (
     <div
       id="modal-job-editor"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/75 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto"
     >
-      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col my-auto max-h-[95vh]">
+      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200/90 overflow-hidden flex flex-col my-auto max-h-[95vh]">
         {/* Modal Header */}
-        <div className="bg-[#032F73] text-white px-6 py-4 flex items-center justify-between border-b border-blue-900">
+        <div className="bg-[#032F73] text-white px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-white/10 rounded-lg text-yellow-300">
+            <div className="p-2 bg-white/10 rounded-xl text-[#EA7A2D]">
               <PlusCircle className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-black text-lg tracking-wide uppercase font-sans">
+              <h3 className="font-bold text-base sm:text-lg tracking-tight">
                 {jobToEdit ? 'Edit Pekerjaan' : 'Tambah Pekerjaan Baru'}
               </h3>
-              <p className="text-xs text-blue-200">
-                Kalkulasi target schedule otomatis sesuai durasi hari kerja & tanggal referensi
+              <p className="text-xs text-blue-200/90 font-normal">
+                Target schedule dihitung otomatis sesuai durasi kerja &amp; tanggal referensi
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+            aria-label="Tutup modal"
           >
             <X className="w-5 h-5" />
           </button>
@@ -185,9 +185,9 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
         <form onSubmit={handleSubmit} className="p-6 overflow-y-auto flex flex-col gap-4">
           {/* 1. Deskripsi Pekerjaan */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-              <FileText className="w-4 h-4 text-[#032F73]" />
-              <span>1. Deskripsi Pekerjaan</span>
+            <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5 text-[#032F73]" />
+              <span>Deskripsi Pekerjaan</span>
             </label>
             <textarea
               required
@@ -195,17 +195,53 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
               value={deskripsi}
               onChange={(e) => setDeskripsi(e.target.value)}
               placeholder="Contoh: Repair Tube Bundle 101C / Pabrikasi Sand Loading Support"
-              className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-slate-900 font-bold placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#032F73] text-sm"
+              className="w-full bg-white border border-slate-300 rounded-xl p-3 text-slate-900 font-medium placeholder:text-slate-400 focus:outline-none focus:border-[#032F73] focus:ring-2 focus:ring-[#032F73]/15 text-sm transition-all"
             />
           </div>
 
-          {/* 2. Area / Lokasi Pabrik & PIC (Nama) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            {/* 2. Area / Lokasi Pabrik */}
+          {/* 2. Status Pekerjaan (I/P vs HOLD) */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[#F8FAFC] border border-slate-200/80 rounded-xl px-3.5 py-2.5">
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 text-[#032F73]" />
+              <div>
+                <div className="text-xs font-semibold text-slate-800">Status Pekerjaan</div>
+                <div className="text-[11px] text-slate-500">
+                  Pilih I/P (sedang dikerjakan) atau HOLD (sementara ditunda)
+                </div>
+              </div>
+            </div>
+            <div className="inline-flex items-center gap-1 bg-slate-200/75 p-1 rounded-lg self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setWorkStatus('I/P')}
+                className={`px-3.5 py-1.5 rounded-md text-xs font-bold transition-all whitespace-nowrap ${
+                  workStatus === 'I/P'
+                    ? 'bg-[#032F73] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                I/P (In Progress)
+              </button>
+              <button
+                type="button"
+                onClick={() => setWorkStatus('HOLD')}
+                className={`px-3.5 py-1.5 rounded-md text-xs font-bold transition-all whitespace-nowrap ${
+                  workStatus === 'HOLD'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                HOLD
+              </button>
+            </div>
+          </div>
+
+          {/* 3. Area / Lokasi Pabrik & PIC (Nama) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                <MapPin className="w-4 h-4 text-[#032F73]" />
-                <span>2. Area / Lokasi Pabrik</span>
+              <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-[#032F73]" />
+                <span>Area / Lokasi Pabrik</span>
               </label>
               <div className="flex flex-col gap-1.5">
                 <select
@@ -218,14 +254,14 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
                       setArea(e.target.value);
                     }
                   }}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-[#032F73] text-sm"
+                  className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-semibold focus:outline-none focus:border-[#032F73] focus:ring-2 focus:ring-[#032F73]/15 text-sm transition-all"
                 >
                   {COMMON_AREAS.map((a) => (
                     <option key={a} value={a}>
                       {a}
                     </option>
                   ))}
-                  <option value="MANUAL">✍️ Isi Manual (Lainnya)...</option>
+                  <option value="MANUAL">Isi Manual (Lainnya)...</option>
                 </select>
 
                 {isCustomArea ? (
@@ -236,98 +272,91 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
                     placeholder="Ketik area / lokasi manual..."
                     value={customAreaText}
                     onChange={(e) => setCustomAreaText(e.target.value)}
-                    className="w-full bg-white border-2 border-[#032F73] rounded-lg px-3 py-2 text-slate-900 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-[#032F73]"
+                    className="w-full bg-white border border-[#032F73] rounded-xl px-3 py-2 text-slate-900 font-semibold text-sm focus:outline-none focus:ring-2 focus:ring-[#032F73]/15"
                   />
                 ) : (
-                  <div className="text-xs text-slate-600 flex items-center px-3 py-1.5 bg-slate-100 rounded-lg border border-slate-200">
-                    <span>Area terpilih:</span>
-                    <strong className="ml-1.5 text-[#032F73] font-black">{area}</strong>
-                  </div>
+                  <span className="text-[11px] text-slate-500">
+                    Area terpilih: <strong className="text-[#032F73] font-semibold">{area}</strong>
+                  </span>
                 )}
               </div>
             </div>
 
-            {/* PIC (Nama Penanggung Jawab) */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                <User className="w-4 h-4 text-[#032F73]" />
-                <span>PIC (Nama)</span>
+              <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-[#032F73]" />
+                <span>PIC (Penanggung Jawab)</span>
               </label>
               <input
                 type="text"
-                placeholder="Contoh: Hendra W. / Agus P. / Budi"
+                placeholder="Contoh: Hendra W. / Agus P."
                 value={pic}
                 onChange={(e) => setPic(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-bold placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#032F73] text-sm"
+                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-medium placeholder:text-slate-400 focus:outline-none focus:border-[#032F73] focus:ring-2 focus:ring-[#032F73]/15 text-sm transition-all"
               />
-              <span className="text-[11px] text-slate-500 font-medium">
-                Ditampilkan tepat di bawah Area/Lokasi pada tabel job
+              <span className="text-[11px] text-slate-500">
+                Ditampilkan tepat di bawah Area pada baris pekerjaan
               </span>
             </div>
           </div>
 
-          {/* 3 & 4. Tanggal Start & Tanggal Finish */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-            {/* Tanggal Start */}
+          {/* 4. Tanggal Start & Tanggal Finish */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+              <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-[#032F73]" />
-                <span>3. Tanggal Start (Mulai)</span>
+                <span>Tanggal Start (Mulai)</span>
               </label>
               <input
                 type="date"
                 required
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-mono font-bold text-sm focus:outline-none focus:ring-2 focus:ring-[#032F73]"
+                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono-data font-semibold text-sm focus:outline-none focus:border-[#032F73] focus:ring-2 focus:ring-[#032F73]/15"
               />
-              <span className="text-[11px] font-bold text-slate-500">
+              <span className="text-[11px] font-medium text-slate-500">
                 {formatToIndonesian(startDate)}
               </span>
             </div>
 
-            {/* Tanggal Finish */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+              <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-[#EA7A2D]" />
-                <span>4. Tanggal Finish (Selesai)</span>
+                <span>Tanggal Finish (Selesai)</span>
               </label>
               <input
                 type="date"
                 required
                 value={finishDate}
                 onChange={(e) => setFinishDate(e.target.value)}
-                className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-slate-900 font-mono font-bold text-sm focus:outline-none focus:ring-2 focus:ring-[#EA7A2D]"
+                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono-data font-semibold text-sm focus:outline-none focus:border-[#EA7A2D] focus:ring-2 focus:ring-[#EA7A2D]/20"
               />
-              <span className="text-[11px] font-bold text-[#EA7A2D]">
+              <span className="text-[11px] font-semibold text-[#D96B1F]">
                 {formatToIndonesian(finishDate)}
               </span>
             </div>
           </div>
 
-          {/* 5 & 6. Progress Actual & Tanggal Referensi Dashboard */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            {/* Progress Actual */}
-            <div className="flex flex-col gap-1.5 p-3.5 bg-blue-50/50 rounded-xl border border-blue-200">
-              <label className="text-xs font-black text-[#1054C1] uppercase tracking-wider flex items-center justify-between">
+          {/* 5. Progress Actual & Tanggal Referensi Dashboard */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-[#1054C1] flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   <Percent className="w-3.5 h-3.5" />
-                  <span>5. ACTUAL (%)</span>
+                  <span>Progress Actual (%)</span>
                 </span>
-                <span className="font-mono text-sm font-black">{progressActual}%</span>
+                <span className="font-mono-data text-sm font-bold">{progressActual}%</span>
               </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max="100"
-                  required
-                  value={progressActual}
-                  onChange={(e) => setProgressActual(parseFloat(e.target.value) || 0)}
-                  className="w-full bg-white border border-[#1054C1]/40 rounded-lg px-3 py-2 text-slate-900 font-mono font-black text-base focus:outline-none focus:ring-2 focus:ring-[#1054C1]"
-                />
-              </div>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                required
+                value={progressActual}
+                onChange={(e) => setProgressActual(parseFloat(e.target.value) || 0)}
+                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono-data font-bold text-sm focus:outline-none focus:border-[#1054C1] focus:ring-2 focus:ring-[#1054C1]/15"
+              />
               <input
                 type="range"
                 min="0"
@@ -335,23 +364,22 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
                 step="0.5"
                 value={progressActual}
                 onChange={(e) => setProgressActual(parseFloat(e.target.value) || 0)}
-                className="w-full accent-[#1054C1] cursor-pointer"
+                className="w-full accent-[#1054C1] cursor-pointer mt-0.5"
               />
             </div>
 
-            {/* Tanggal Referensi Dashboard */}
-            <div className="flex flex-col gap-1.5 p-3.5 bg-orange-50/50 rounded-xl border border-orange-200">
+            <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-black text-[#EA7A2D] uppercase tracking-wider flex items-center gap-1.5">
+                <label className="text-xs font-semibold text-[#D96B1F] flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5" />
-                  <span>6. Tanggal Hari Ini</span>
+                  <span>Tanggal Referensi</span>
                 </label>
                 <button
                   type="button"
                   onClick={handleSetTodayRef}
-                  className="text-[10px] font-black uppercase text-orange-700 bg-orange-200/70 hover:bg-orange-300 px-2 py-0.5 rounded transition-colors"
+                  className="text-[11px] font-semibold text-[#EA7A2D] hover:text-[#D96B1F] transition-colors"
                 >
-                  Hari Ini
+                  Set Hari Ini
                 </button>
               </div>
               <input
@@ -359,58 +387,55 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
                 required
                 value={refDate}
                 onChange={(e) => setRefDate(e.target.value)}
-                className="w-full bg-white border border-[#EA7A2D]/40 rounded-lg px-3 py-2 text-slate-900 font-mono font-bold text-sm focus:outline-none focus:ring-2 focus:ring-[#EA7A2D]"
+                className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-900 font-mono-data font-semibold text-sm focus:outline-none focus:border-[#EA7A2D] focus:ring-2 focus:ring-[#EA7A2D]/20"
               />
-              <span className="text-[11px] font-bold text-slate-600">
+              <span className="text-[11px] font-medium text-slate-500">
                 {formatToIndonesian(refDate)}
               </span>
             </div>
           </div>
 
-          {/* BOX KALKULASI OTOMATIS (Sesuai Logika Bagian 2) */}
-          <div className="bg-slate-900 text-white rounded-xl p-4 border-2 border-yellow-500/80 shadow-md flex flex-col gap-2.5">
-            <div className="flex items-center justify-between border-b border-slate-700 pb-2">
+          {/* Ringkasan Kalkulasi Target Schedule */}
+          <div className="bg-[#F4F7FB] rounded-xl p-4 border border-[#032F73]/15 flex flex-col gap-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200/80">
               <div className="flex items-center gap-2">
-                <Calculator className="w-4 h-4 text-yellow-400" />
-                <span className="text-xs font-black text-yellow-400 tracking-wider uppercase font-sans">
-                  HASIL KALKULASI TARGET OTOMATIS
+                <Calculator className="w-4 h-4 text-[#032F73]" />
+                <span className="text-xs font-bold text-[#032F73]">
+                  Hasil Kalkulasi Target Schedule
                 </span>
               </div>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-yellow-400/20 text-yellow-300 font-mono font-bold">
-                Formula Aktif
+              <span className="text-[11px] text-slate-500 font-medium">
+                Otomatis
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center pt-1">
-              {/* 1. Total Hari */}
-              <div className="bg-slate-800/90 rounded-lg p-2 flex flex-col items-center">
-                <span className="text-[10px] text-slate-400 uppercase font-bold">Total Durasi</span>
-                <span className="text-base font-black text-white font-mono mt-0.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+              <div className="flex flex-col items-center">
+                <span className="text-[11px] text-slate-500 font-medium">Total Durasi</span>
+                <span className="text-base font-bold text-slate-900 font-mono-data mt-0.5">
                   {calculation.totalDays} Hari
                 </span>
-                <span className="text-[9px] text-slate-400">Finish - Start + 1</span>
+                <span className="text-[10px] text-slate-400">Finish - Start + 1</span>
               </div>
 
-              {/* 2. Target Harian */}
-              <div className="bg-slate-800/90 rounded-lg p-2 flex flex-col items-center">
-                <span className="text-[10px] text-slate-400 uppercase font-bold">Target Harian</span>
-                <span className="text-base font-black text-orange-400 font-mono mt-0.5">
+              <div className="flex flex-col items-center sm:border-l sm:border-slate-200/80">
+                <span className="text-[11px] text-slate-500 font-medium">Target Harian</span>
+                <span className="text-base font-bold text-[#032F73] font-mono-data mt-0.5">
                   {calculation.dailyTargetPct.toFixed(2)}%
                 </span>
-                <span className="text-[9px] text-slate-400">100% / Total Hari</span>
+                <span className="text-[10px] text-slate-400">100% / Total Hari</span>
               </div>
 
-              {/* 3. Hari Berjalan */}
-              <div className="bg-slate-800/90 rounded-lg p-2 flex flex-col items-center">
-                <span className="text-[10px] text-slate-400 uppercase font-bold">Hari Berjalan</span>
-                <span className="text-base font-black text-cyan-300 font-mono mt-0.5">
+              <div className="flex flex-col items-center sm:border-l sm:border-slate-200/80">
+                <span className="text-[11px] text-slate-500 font-medium">Hari Berjalan</span>
+                <span className="text-base font-bold text-[#1054C1] font-mono-data mt-0.5">
                   {calculation.isBeforeStart
                     ? '0 Hari'
                     : calculation.isAfterFinish
-                    ? `${calculation.totalDays} Hari (Selesai)`
-                    : `Hari ke-${calculation.daysElapsed}`}
+                    ? `${calculation.totalDays} Hari`
+                    : `Ke-${calculation.daysElapsed}`}
                 </span>
-                <span className="text-[9px] text-slate-400">
+                <span className="text-[10px] text-slate-400">
                   {calculation.isBeforeStart
                     ? 'Belum Mulai'
                     : calculation.isAfterFinish
@@ -419,22 +444,18 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
                 </span>
               </div>
 
-              {/* 4. Target Schedule (%) */}
-              <div className="bg-orange-950/80 border border-orange-500 rounded-lg p-2 flex flex-col items-center">
-                <span className="text-[10px] text-orange-300 uppercase font-black font-inter">
-                  Target Schedule
-                </span>
-                <span className="text-xl font-black text-[#EA7A2D] font-inter tabular-nums mt-0.5">
+              <div className="flex flex-col items-center sm:border-l sm:border-slate-200/80">
+                <span className="text-[11px] text-[#D96B1F] font-semibold">Target Schedule</span>
+                <span className="text-lg font-extrabold text-[#EA7A2D] font-mono-data mt-0.5">
                   {effectiveTarget.toFixed(2)}%
                 </span>
-                <span className="text-[9px] text-orange-200 font-inter tabular-nums">
-                  ({calculation.daysElapsed}/{calculation.totalDays}) × 100%
+                <span className="text-[10px] text-slate-500 font-mono-data">
+                  ({calculation.daysElapsed}/{calculation.totalDays}) &times; 100%
                 </span>
               </div>
             </div>
 
-            {/* Optional Manual Target Override toggle */}
-            <div className="pt-1 flex items-center justify-between text-xs text-slate-400 border-t border-slate-800">
+            <div className="pt-2 flex items-center justify-between text-xs text-slate-600 border-t border-slate-200/80">
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <input
                   type="checkbox"
@@ -442,7 +463,7 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
                   onChange={(e) => setManualTargetOverride(e.target.checked)}
                   className="rounded accent-[#EA7A2D]"
                 />
-                <span className="text-[11px]">Override nilai Target Schedule secara manual</span>
+                <span className="text-xs font-medium">Ubah nilai Target Schedule secara manual</span>
               </label>
 
               {manualTargetOverride && (
@@ -454,16 +475,16 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
                     max="100"
                     value={manualTargetValue}
                     onChange={(e) => setManualTargetValue(parseFloat(e.target.value) || 0)}
-                    className="w-20 bg-slate-800 border border-orange-400 text-white font-mono px-2 py-0.5 rounded text-xs text-right"
+                    className="w-20 bg-white border border-[#EA7A2D] text-slate-900 font-mono-data font-semibold px-2 py-0.5 rounded-md text-xs text-right focus:outline-none"
                   />
-                  <span className="font-mono">%</span>
+                  <span className="font-mono-data text-slate-500">%</span>
                 </div>
               )}
             </div>
           </div>
 
           {/* Form Actions */}
-          <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+          <div className="flex items-center justify-between pt-3 border-t border-slate-200/80">
             {jobToEdit && onDeleteJob ? (
               <button
                 type="button"
@@ -471,7 +492,7 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
                   onDeleteJob(jobToEdit.id);
                   onClose();
                 }}
-                className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 rounded-xl text-xs font-bold transition-colors"
+                className="flex items-center gap-1.5 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 px-3.5 py-2 rounded-xl text-xs font-semibold transition-colors"
               >
                 <Trash2 className="w-4 h-4" />
                 <span>Hapus Job</span>
@@ -484,13 +505,13 @@ export const JobEditorModal: React.FC<JobEditorModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors"
+                className="px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors"
               >
                 Batal
               </button>
               <button
                 type="submit"
-                className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-[#032F73] hover:bg-blue-900 text-white text-xs font-black tracking-wide shadow-md transition-all"
+                className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-[#032F73] hover:bg-[#022154] text-white text-xs font-bold shadow-sm transition-colors"
               >
                 <Save className="w-4 h-4" />
                 <span>Simpan Pekerjaan</span>

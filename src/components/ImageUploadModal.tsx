@@ -36,7 +36,6 @@ export const ImageUploadModal: React.FC<ImageUploadModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync temp state when opened
   React.useEffect(() => {
     if (isOpen) {
       setTempBranding(branding);
@@ -82,7 +81,6 @@ export const ImageUploadModal: React.FC<ImageUploadModalProps> = ({
     if (file) {
       handleProcessFile(file, activeTab);
     }
-    // reset input so the same file can be re-selected if needed
     e.target.value = '';
   };
 
@@ -127,81 +125,74 @@ export const ImageUploadModal: React.FC<ImageUploadModalProps> = ({
   return (
     <div
       id="modal-image-upload"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-150"
     >
-      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200/90 overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header Modal */}
         <div className="bg-[#032F73] text-white px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-white/10 rounded-lg">
-              <ImageIcon className="w-5 h-5 text-yellow-300" />
+            <div className="p-2 bg-white/10 rounded-xl text-[#EA7A2D]">
+              <ImageIcon className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-black text-lg tracking-wide uppercase font-sans">
-                Kustomisasi Logo & Petunjuk K3
+              <h3 className="font-bold text-base sm:text-lg tracking-tight">
+                Kustomisasi Logo &amp; Petunjuk K3
               </h3>
-              <p className="text-xs text-blue-200 font-medium">
-                Unggah gambar asli perusahaan dan poster instruksi keselamatan K3
+              <p className="text-xs text-blue-200/90 font-normal">
+                Unggah gambar logo perusahaan dan poster keselamatan K3 resmi
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+            aria-label="Tutup modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Tab Selection */}
-        <div className="flex border-b border-slate-200 bg-slate-50 px-6 pt-3 gap-2">
-          <button
-            onClick={() => setActiveTab('company')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-t-lg font-bold text-xs uppercase tracking-wider transition-colors border-b-2 ${
-              activeTab === 'company'
-                ? 'bg-white text-[#032F73] border-[#032F73] shadow-xs'
-                : 'text-slate-500 hover:text-slate-800 border-transparent'
-            }`}
-          >
-            <Building2 className="w-4 h-4 text-[#032F73]" />
-            <span>Logo Perusahaan</span>
-            {tempBranding.companyLogoUrl && (
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            )}
-          </button>
+        <div className="px-6 py-3 bg-[#F8FAFC] border-b border-slate-200/80">
+          <div className="inline-flex items-center gap-1 bg-slate-200/70 p-1 rounded-xl flex-wrap">
+            <button
+              onClick={() => setActiveTab('company')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold text-xs transition-all whitespace-nowrap ${
+                activeTab === 'company'
+                  ? 'bg-white text-[#032F73] shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Building2 className="w-3.5 h-3.5 text-[#032F73]" />
+              <span>Logo Perusahaan</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('k3')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-t-lg font-bold text-xs uppercase tracking-wider transition-colors border-b-2 ${
-              activeTab === 'k3'
-                ? 'bg-white text-[#EA7A2D] border-[#EA7A2D] shadow-xs'
-                : 'text-slate-500 hover:text-slate-800 border-transparent'
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4 text-[#EA7A2D]" />
-            <span>Petunjuk K3 Asli</span>
-            {tempBranding.k3PosterUrl && (
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            )}
-          </button>
+            <button
+              onClick={() => setActiveTab('k3')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold text-xs transition-all whitespace-nowrap ${
+                activeTab === 'k3'
+                  ? 'bg-white text-[#032F73] shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-[#EA7A2D]" />
+              <span>Petunjuk K3 Asli</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('welding')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-t-lg font-bold text-xs uppercase tracking-wider transition-colors border-b-2 ${
-              activeTab === 'welding'
-                ? 'bg-white text-[#032F73] border-[#032F73] shadow-xs'
-                : 'text-slate-500 hover:text-slate-800 border-transparent'
-            }`}
-          >
-            <Flame className="w-4 h-4 text-[#EA7A2D]" />
-            <span>Logo Welding Shop</span>
-            {tempBranding.weldingLogoUrl && (
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            )}
-          </button>
+            <button
+              onClick={() => setActiveTab('welding')}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg font-semibold text-xs transition-all whitespace-nowrap ${
+                activeTab === 'welding'
+                  ? 'bg-white text-[#032F73] shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Flame className="w-3.5 h-3.5 text-[#EA7A2D]" />
+              <span>Logo Welding Shop</span>
+            </button>
+          </div>
         </div>
 
-        {/* Hidden File Input */}
         <input
           ref={fileInputRef}
           type="file"
@@ -213,7 +204,7 @@ export const ImageUploadModal: React.FC<ImageUploadModalProps> = ({
         {/* Body Content */}
         <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
           {errorMessage && (
-            <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs font-semibold">
+            <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-medium">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
               <span>{errorMessage}</span>
             </div>
@@ -222,66 +213,59 @@ export const ImageUploadModal: React.FC<ImageUploadModalProps> = ({
           {/* TAB 1: LOGO PERUSAHAAN */}
           {activeTab === 'company' && (
             <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div>
-                  <h4 className="font-bold text-sm text-slate-800">
+                  <h4 className="font-bold text-sm text-slate-900">
                     Logo Perusahaan (Pupuk Kaltim)
                   </h4>
                   <p className="text-xs text-slate-500">
                     Tampil di sudut kiri atas header utama dashboard
                   </p>
                 </div>
-                {tempBranding.companyLogoUrl ? (
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800">
-                    Gambar Kustom Aktif
-                  </span>
-                ) : (
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600">
-                    Format Standar Vektor
-                  </span>
-                )}
+                <span className={`text-xs font-semibold ${tempBranding.companyLogoUrl ? 'text-emerald-700' : 'text-slate-500'}`}>
+                  {tempBranding.companyLogoUrl ? 'Gambar Kustom Aktif' : 'Format Standar Vektor'}
+                </span>
               </div>
 
-              {/* Preview Box */}
-              <div className="p-4 bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-center min-h-[110px]">
+              <div className="p-4 bg-[#F4F7FB] border border-slate-200/80 rounded-xl flex items-center justify-center min-h-[110px]">
                 {tempBranding.companyLogoUrl ? (
                   <img
                     src={tempBranding.companyLogoUrl}
                     alt="Logo Perusahaan Kustom"
-                    className="max-h-20 max-w-full object-contain drop-shadow-sm rounded"
+                    referrerPolicy="no-referrer"
+                    className="max-h-20 max-w-full object-contain rounded"
                   />
                 ) : (
-                  <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-slate-300 shadow-xs">
-                    <div className="w-9 h-9 rounded-full bg-[#032F73] flex items-center justify-center text-white font-black text-xs">
+                  <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-slate-200">
+                    <div className="w-9 h-9 rounded-full bg-[#032F73] flex items-center justify-center text-white font-bold text-xs">
                       PKT
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-[#032F73] font-black text-sm">PUPUK KALTIM</span>
-                      <span className="text-slate-500 text-[9px] font-bold">
-                        SBU JASA PELAYANAN PABRIK (STANDAR)
+                      <span className="text-[#032F73] font-extrabold text-sm">PUPUK KALTIM</span>
+                      <span className="text-slate-500 text-[10px] font-medium">
+                        SBU Jasa Pelayanan Pabrik (Standar)
                       </span>
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* Upload Dropzone */}
               <div
                 onDrop={(e) => handleDrop(e, 'company')}
                 onDragOver={(e) => handleDragOver(e, 'company')}
                 onDragLeave={handleDragLeave}
                 onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all ${
+                className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-colors ${
                   dragOverTab === 'company'
                     ? 'border-[#032F73] bg-blue-50/60'
-                    : 'border-slate-300 hover:border-[#032F73] hover:bg-slate-50'
+                    : 'border-slate-300 bg-[#F8FAFC] hover:border-[#032F73] hover:bg-blue-50/30'
                 }`}
               >
-                <Upload className="w-8 h-8 text-[#032F73] mb-2" />
-                <span className="font-bold text-sm text-slate-700">
-                  Tarik & letakkan gambar logo di sini, atau klik untuk memilih file
+                <Upload className="w-7 h-7 text-[#032F73] mb-2" />
+                <span className="font-semibold text-sm text-slate-800 text-center">
+                  Tarik &amp; letakkan gambar logo di sini, atau klik untuk memilih file
                 </span>
-                <span className="text-xs text-slate-400 mt-1">
+                <span className="text-xs text-slate-500 mt-1">
                   Mendukung PNG, JPG, JPEG, SVG, WebP (Disarankan PNG transparan)
                 </span>
               </div>
@@ -291,31 +275,24 @@ export const ImageUploadModal: React.FC<ImageUploadModalProps> = ({
           {/* TAB 2: PETUNJUK K3 */}
           {activeTab === 'k3' && (
             <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div>
-                  <h4 className="font-bold text-sm text-slate-800">
+                  <h4 className="font-bold text-sm text-slate-900">
                     Poster / Gambar Petunjuk K3 Asli
                   </h4>
                   <p className="text-xs text-slate-500">
                     Tampil pada panel vertikal kiri di bawah counter Job Aktif
                   </p>
                 </div>
-                {tempBranding.k3PosterUrl && tempBranding.useCustomK3Image ? (
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800">
-                    Poster Asli Aktif
-                  </span>
-                ) : (
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600">
-                    Ikon Vektor Standar
-                  </span>
-                )}
+                <span className={`text-xs font-semibold ${tempBranding.k3PosterUrl && tempBranding.useCustomK3Image ? 'text-emerald-700' : 'text-slate-500'}`}>
+                  {tempBranding.k3PosterUrl && tempBranding.useCustomK3Image ? 'Poster Asli Aktif' : 'Ikon Vektor Standar'}
+                </span>
               </div>
 
-              {/* Switch / Mode toggle if poster uploaded */}
               {tempBranding.k3PosterUrl && (
-                <div className="flex items-center justify-between bg-orange-50 border border-orange-200 rounded-xl p-3">
+                <div className="flex items-center justify-between bg-[#FFF8F3] border border-[#EA7A2D]/25 rounded-xl p-3">
                   <div className="flex flex-col">
-                    <span className="text-xs font-black text-[#EA7A2D] uppercase">
+                    <span className="text-xs font-bold text-[#D96B1F]">
                       Mode Tampilan K3
                     </span>
                     <span className="text-xs text-slate-600">
@@ -330,57 +307,53 @@ export const ImageUploadModal: React.FC<ImageUploadModalProps> = ({
                         useCustomK3Image: !prev.useCustomK3Image,
                       }))
                     }
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
                       tempBranding.useCustomK3Image
-                        ? 'bg-[#EA7A2D] text-white shadow-xs'
+                        ? 'bg-[#EA7A2D] text-white'
                         : 'bg-slate-200 text-slate-700'
                     }`}
                   >
                     {tempBranding.useCustomK3Image
-                      ? '✓ Menampilkan Gambar Asli'
+                      ? 'Menampilkan Gambar Asli'
                       : 'Menampilkan Ikon Vektor'}
                   </button>
                 </div>
               )}
 
-              {/* Preview Box */}
-              <div className="p-4 bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-center min-h-[160px] max-h-[220px] overflow-hidden">
+              <div className="p-4 bg-[#F4F7FB] border border-slate-200/80 rounded-xl flex items-center justify-center min-h-[160px] max-h-[220px] overflow-hidden">
                 {tempBranding.k3PosterUrl ? (
-                  <div className="relative group max-h-[200px] flex items-center justify-center">
-                    <img
-                      src={tempBranding.k3PosterUrl}
-                      alt="Poster K3 Asli"
-                      className="max-h-[190px] w-auto object-contain rounded-lg shadow-md border border-slate-300"
-                    />
-                  </div>
+                  <img
+                    src={tempBranding.k3PosterUrl}
+                    alt="Poster K3 Asli"
+                    referrerPolicy="no-referrer"
+                    className="max-h-[190px] w-auto object-contain rounded-lg border border-slate-200"
+                  />
                 ) : (
                   <div className="flex flex-col items-center text-center p-4">
-                    <ShieldCheck className="w-10 h-10 text-[#EA7A2D] mb-1" />
-                    <span className="text-xs font-bold text-slate-700">
-                      Format Standar: 4 Ikon Lingkaran K3 Oranye (Helm, Sarung Tangan, Sepatu,
-                      Kebersihan) + Perisai Safety First
+                    <ShieldCheck className="w-9 h-9 text-[#EA7A2D] mb-1.5" />
+                    <span className="text-xs font-medium text-slate-600 max-w-md">
+                      Format Standar: 4 Ikon Lingkaran K3 Oranye (Helm, Sarung Tangan, Sepatu, Kebersihan) + Perisai Safety First
                     </span>
                   </div>
                 )}
               </div>
 
-              {/* Upload Dropzone */}
               <div
                 onDrop={(e) => handleDrop(e, 'k3')}
                 onDragOver={(e) => handleDragOver(e, 'k3')}
                 onDragLeave={handleDragLeave}
                 onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all ${
+                className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-colors ${
                   dragOverTab === 'k3'
                     ? 'border-[#EA7A2D] bg-orange-50/60'
-                    : 'border-slate-300 hover:border-[#EA7A2D] hover:bg-slate-50'
+                    : 'border-slate-300 bg-[#F8FAFC] hover:border-[#EA7A2D] hover:bg-orange-50/30'
                 }`}
               >
-                <Upload className="w-8 h-8 text-[#EA7A2D] mb-2" />
-                <span className="font-bold text-sm text-slate-700">
-                  Tarik & letakkan gambar poster / petunjuk K3 asli di sini, atau klik untuk memilih
+                <Upload className="w-7 h-7 text-[#EA7A2D] mb-2" />
+                <span className="font-semibold text-sm text-slate-800 text-center">
+                  Tarik &amp; letakkan gambar poster K3 asli di sini, atau klik untuk memilih
                 </span>
-                <span className="text-xs text-slate-400 mt-1">
+                <span className="text-xs text-slate-500 mt-1">
                   Mendukung foto/scan poster keselamatan resmi workshop (PNG, JPG, WebP)
                 </span>
               </div>
@@ -390,66 +363,59 @@ export const ImageUploadModal: React.FC<ImageUploadModalProps> = ({
           {/* TAB 3: LOGO WELDING SHOP */}
           {activeTab === 'welding' && (
             <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div>
-                  <h4 className="font-bold text-sm text-slate-800">
+                  <h4 className="font-bold text-sm text-slate-900">
                     Logo Welding Shop / SBU
                   </h4>
                   <p className="text-xs text-slate-500">
                     Tampil di sudut kanan atas header dashboard
                   </p>
                 </div>
-                {tempBranding.weldingLogoUrl ? (
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800">
-                    Gambar Kustom Aktif
-                  </span>
-                ) : (
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600">
-                    Format Standar Vektor
-                  </span>
-                )}
+                <span className={`text-xs font-semibold ${tempBranding.weldingLogoUrl ? 'text-emerald-700' : 'text-slate-500'}`}>
+                  {tempBranding.weldingLogoUrl ? 'Gambar Kustom Aktif' : 'Format Standar Vektor'}
+                </span>
               </div>
 
-              {/* Preview Box */}
-              <div className="p-4 bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-center min-h-[110px]">
+              <div className="p-4 bg-[#F4F7FB] border border-slate-200/80 rounded-xl flex items-center justify-center min-h-[110px]">
                 {tempBranding.weldingLogoUrl ? (
                   <img
                     src={tempBranding.weldingLogoUrl}
                     alt="Logo Welding Shop Kustom"
-                    className="max-h-20 max-w-full object-contain drop-shadow-sm rounded"
+                    referrerPolicy="no-referrer"
+                    className="max-h-20 max-w-full object-contain rounded"
                   />
                 ) : (
-                  <div className="flex items-center gap-2.5 bg-white px-4 py-2 rounded-lg border border-slate-300 shadow-xs">
-                    <div className="w-9 h-9 rounded-md bg-[#032F73] flex items-center justify-center text-[#EA7A2D] font-black text-xs">
+                  <div className="flex items-center gap-2.5 bg-white px-4 py-2 rounded-lg border border-slate-200">
+                    <div className="w-9 h-9 rounded-md bg-[#032F73] flex items-center justify-center text-[#EA7A2D]">
                       <Flame className="w-5 h-5" />
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-[#EA7A2D] font-black text-sm">WELDING SHOP</span>
-                      <span className="text-[#032F73] text-[9px] font-extrabold tracking-widest">
-                        WORKSHOP & FABRICATION (STANDAR)
+                      <span className="text-[#EA7A2D] font-extrabold text-sm">WELDING SHOP</span>
+                      <span className="text-[#032F73] text-[10px] font-semibold">
+                        Workshop &amp; Fabrication (Standar)
                       </span>
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* Upload Dropzone */}
               <div
                 onDrop={(e) => handleDrop(e, 'welding')}
                 onDragOver={(e) => handleDragOver(e, 'welding')}
                 onDragLeave={handleDragLeave}
                 onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all ${
+                className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-colors ${
                   dragOverTab === 'welding'
                     ? 'border-[#032F73] bg-blue-50/60'
-                    : 'border-slate-300 hover:border-[#032F73] hover:bg-slate-50'
+                    : 'border-slate-300 bg-[#F8FAFC] hover:border-[#032F73] hover:bg-blue-50/30'
                 }`}
               >
-                <Upload className="w-8 h-8 text-[#032F73] mb-2" />
-                <span className="font-bold text-sm text-slate-700">
-                  Tarik & letakkan logo welding di sini, atau klik untuk memilih file
+                <Upload className="w-7 h-7 text-[#032F73] mb-2" />
+                <span className="font-semibold text-sm text-slate-800 text-center">
+                  Tarik &amp; letakkan logo welding di sini, atau klik untuk memilih file
                 </span>
-                <span className="text-xs text-slate-400 mt-1">
+                <span className="text-xs text-slate-500 mt-1">
                   Mendukung PNG, JPG, JPEG, SVG, WebP
                 </span>
               </div>
@@ -458,21 +424,21 @@ export const ImageUploadModal: React.FC<ImageUploadModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="bg-slate-50 px-6 py-3 border-t border-slate-200 flex items-center justify-between">
+        <div className="bg-[#F8FAFC] px-6 py-3.5 border-t border-slate-200/80 flex items-center justify-between gap-3">
           <button
             type="button"
             onClick={handleResetCurrent}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span>Kembalikan Tab Ini ke Standar</span>
+            <span>Kembalikan Standar</span>
           </button>
 
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors"
+              className="px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors"
             >
               Batal
             </button>
@@ -480,7 +446,7 @@ export const ImageUploadModal: React.FC<ImageUploadModalProps> = ({
               type="button"
               disabled={isProcessing}
               onClick={handleSave}
-              className="flex items-center gap-1.5 px-5 py-2 rounded-lg bg-[#032F73] hover:bg-blue-900 text-white text-xs font-black tracking-wide shadow-md transition-all"
+              className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-[#032F73] hover:bg-[#022154] text-white text-xs font-bold transition-colors"
             >
               <Check className="w-4 h-4" />
               <span>Simpan Perubahan</span>

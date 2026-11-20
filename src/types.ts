@@ -1,3 +1,7 @@
+export type JobWorkStatus = 'I/P' | 'HOLD';
+
+export type JobSortMode = 'priority' | 'deadline' | 'newest';
+
 export interface JobItem {
   id: number;
   deskripsi: string;
@@ -7,7 +11,7 @@ export interface JobItem {
   finish: string;
   progress_target: number;
   progress_actual: number;
-  status: 'AKTIF' | 'SELESAI' | 'TERTUNDA' | string;
+  status: 'I/P' | 'HOLD' | 'AKTIF' | 'SELESAI' | 'TERTUNDA' | string;
 }
 
 export interface ArchivedJobItem extends JobItem {

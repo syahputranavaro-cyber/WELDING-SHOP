@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { JobItem, BrandingImages, SyncStatusType, ArchivedJobItem } from './types';
+import { JobItem, BrandingImages, SyncStatusType, ArchivedJobItem, JobSortMode } from './types';
 import { INITIAL_JOBS } from './data/initialJobs';
 import { HeaderBanner } from './components/HeaderBanner';
 import { SidebarSafety } from './components/SidebarSafety';
@@ -14,9 +14,14 @@ import { JobEditorModal } from './components/JobEditorModal';
 import { ImageUploadModal } from './components/ImageUploadModal';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
 import { FinishConfirmModal } from './components/FinishConfirmModal';
-import { PinModal } from './components/PinModal';
 import { ArchiveModal } from './components/ArchiveModal';
-import { calculateJobTarget, getSystemDateFormatted } from './utils/jobCalculations';
+import { useAuth } from './context/AuthContext';
+import {
+  calculateJobTarget,
+  getSystemDateFormatted,
+  evaluateJobHealth,
+  countFinishedThisMonth,
+} from './utils/jobCalculations';
 import {
   apiFetchState,
   apiFetchVersion,
@@ -26,7 +31,6 @@ import {
   apiSaveFullState,
   apiResetServer,
   apiSaveArchive,
-  apiSavePin,
   apiSaveJobFinish,
   apiSaveJobDelete,
   apiSaveJobRestore,
@@ -45,6 +49,39 @@ function recalculateJobsSchedule(jobList: JobItem[], refDate: string): JobItem[]
       progress_target: calc.targetProgressPct,
     };
   });
+}
+
+/**
+ * Menentukan tanggal efektif dashboard:
+ * - Jika mode Otomatis (isAutoDate = true), SELALU gunakan tanggal sistem hari ini secara real-time
+ *   agar tidak pernah tertimpa tanggal lama yang tersimpan di server/database.
+ * - Jika mode Simulasi (isAutoDate = false), gunakan tanggal manual dari server/pengguna.
+ */
+function resolveEffectiveDate(
+  remoteIsAutoDate: unknown,
+  remoteDateText: unknown,
+  fallbackIsAuto: boolean,
+  fallbackDate: string
+): { effectiveIsAuto: boolean; effectiveDate: string } {
+  const effectiveIsAuto =
+    typeof remoteIsAutoDate === 'boolean' ? remoteIsAutoDate : fallbackIsAuto;
+
+  if (effectiveIsAuto) {
+    return {
+      effectiveIsAuto: true,
+      effectiveDate: getSystemDateFormatted(),
+    };
+  }
+
+  const manualDate =
+    typeof remoteDateText === 'string' && remoteDateText.trim()
+      ? remoteDateText
+      : fallbackDate;
+
+  return {
+    effectiveIsAuto: false,
+    effectiveDate: manualDate,
+  };
 }
 
 /**
@@ -135,7 +172,7 @@ function getInitialJobsWithFallback(): { initialList: JobItem[]; backupExists: b
     const v3 = localStorage.getItem('welding_shop_jobs_v3');
     if (v3) {
       const parsed = JSON.parse(v3);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         primary = parsed;
       }
     }
@@ -161,13 +198,10 @@ function getInitialJobsWithFallback(): { initialList: JobItem[]; backupExists: b
     }
   }
 
-  // If primary has fewer jobs than backup (e.g. user previously clicked reset by accident),
-  // we can use backup or mark backupExists = true
   const backupExists = !!backup && (!primary || backup.length > primary.length);
 
-  // If no primary exists at all, take backup or default
   if (!primary) {
-    primary = backup || INITIAL_JOBS;
+    primary = [];
   }
 
   return {
@@ -177,6 +211,7 @@ function getInitialJobsWithFallback(): { initialList: JobItem[]; backupExists: b
 }
 
 export default function App() {
+  const { user, isGuest, signOut } = useAuth();
   // Mode penentuan tanggal: Otomatis (Real-time Sistem) vs Manual (Simulasi)
   const [isAutoDate, setIsAutoDate] = useState<boolean>(() => {
     try {
@@ -243,6 +278,27 @@ export default function App() {
   });
 
   const [autoCycle, setAutoCycle] = useState<boolean>(true);
+  const [sortMode, setSortMode] = useState<JobSortMode>(() => {
+    try {
+      const saved = localStorage.getItem('welding_shop_sort_mode');
+      if (saved === 'priority' || saved === 'deadline' || saved === 'newest') {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return 'priority';
+  });
+
+  const handleChangeSortMode = useCallback((mode: JobSortMode) => {
+    setSortMode(mode);
+    try {
+      localStorage.setItem('welding_shop_sort_mode', mode);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const [isExcelModalOpen, setIsExcelModalOpen] = useState<boolean>(false);
   const [isJobEditorOpen, setIsJobEditorOpen] = useState<boolean>(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState<boolean>(false);
@@ -268,47 +324,13 @@ export default function App() {
     return '1234';
   });
 
-  const [isSessionAuthenticated, setIsSessionAuthenticated] = useState<boolean>(false);
-  const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
-  const [pinPendingAction, setPinPendingAction] = useState<{
-    callback: () => void;
-    description: string;
-  } | null>(null);
-
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState<boolean>(false);
   const [archiveModalInitialTab, setArchiveModalInitialTab] = useState<'finish' | 'deleted'>('finish');
-
-  // Helper untuk meminta otorisasi PIN sebelum mengeksekusi tindakan sensitif
-  const requestPinProtectedAction = useCallback(
-    (action: () => void, description: string) => {
-      if (isSessionAuthenticated) {
-        action();
-        return;
-      }
-      setPinPendingAction({ callback: action, description });
-      setIsPinModalOpen(true);
-    },
-    [isSessionAuthenticated]
-  );
-
-  const handlePinSuccess = useCallback(() => {
-    setIsPinModalOpen(false);
-    if (pinPendingAction) {
-      const pending = pinPendingAction.callback;
-      setPinPendingAction(null);
-      pending();
-    }
-  }, [pinPendingAction]);
-
-  const handleSessionAuthToggle = useCallback((remember: boolean) => {
-    if (remember) {
-      setIsSessionAuthenticated(true);
-    }
-  }, []);
 
   // Recalculate target progress whenever the dashboard reference date changes (manual or automatic)
   const handleUpdateDate = useCallback(
     (newDate: string, isManual: boolean = true) => {
+      if (isGuest) return;
       setCurrentDateText(newDate);
       setIsAutoDate(!isManual);
       try {
@@ -328,11 +350,12 @@ export default function App() {
         setToastMessage(`Mode Otomatis Aktif: Mengikuti tanggal sistem real-time (${newDate}).`);
       }
     },
-    []
+    [isGuest]
   );
 
   // Reset tanggal ke otomatis sistem real-time
   const handleResetToAutoDate = useCallback(() => {
+    if (isGuest) return;
     const today = getSystemDateFormatted();
     setIsAutoDate(true);
     setCurrentDateText(today);
@@ -348,26 +371,43 @@ export default function App() {
       if (res.success && res.version) serverVersionRef.current = res.version;
     });
     setToastMessage(`Kembali ke tanggal sistem otomatis: ${today}. Disinkronkan ke seluruh perangkat.`);
-  }, []);
+  }, [isGuest]);
 
-  // Pengecekan otomatis pergantian hari real-time (setiap 30 detik)
+  // Pengecekan otomatis pergantian hari real-time (langsung saat aktif + setiap 30 detik + saat tab/TV bangun)
   // Ketika jam melewati tengah malam (00:00), tanggal "HARI INI" dan grafik SCHEDULE seluruh job otomatis bertambah/ter-update
   useEffect(() => {
     if (!isAutoDate) return;
 
-    const checkMidnightTransition = () => {
+    const syncToToday = (showToast: boolean) => {
       const systemToday = getSystemDateFormatted();
       if (systemToday !== currentDateText) {
         setCurrentDateText(systemToday);
         setJobs((prevJobs) => recalculateJobsSchedule(prevJobs, systemToday));
-        setToastMessage(
-          `Pergantian hari terdeteksi: Tanggal sistem otomatis diperbarui ke ${systemToday}. Schedule diperbarui.`
-        );
+        if (showToast) {
+          setToastMessage(
+            `Pergantian hari terdeteksi: Tanggal sistem otomatis diperbarui ke ${systemToday}. Schedule diperbarui.`
+          );
+        }
       }
     };
 
-    const interval = setInterval(checkMidnightTransition, 30000);
-    return () => clearInterval(interval);
+    // Sinkronkan seketika jika tanggal masih tertinggal dari tanggal sistem hari ini
+    syncToToday(false);
+
+    const interval = setInterval(() => syncToToday(true), 30000);
+    const handleWake = () => {
+      if (typeof document === 'undefined' || !document.hidden) {
+        syncToToday(false);
+      }
+    };
+    document.addEventListener('visibilitychange', handleWake);
+    window.addEventListener('focus', handleWake);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleWake);
+      window.removeEventListener('focus', handleWake);
+    };
   }, [isAutoDate, currentDateText]);
 
   // Toast auto-clear timer
@@ -516,6 +556,7 @@ export default function App() {
 
   // Handler untuk menyimpan / menyinkronkan seluruh data secara paksa
   const handleForceSyncServer = useCallback(async () => {
+    if (isGuest) return;
     setSyncStatus('saving');
     const res = await saveFullStateSafe({
       jobs,
@@ -534,7 +575,7 @@ export default function App() {
       setSyncStatus('offline');
       setToastMessage(res.message || 'Gagal menghubungi server. Periksa koneksi jaringan.');
     }
-  }, [saveFullStateSafe, jobs, archiveFinish, archiveDeleted, branding, pinCode, currentDateText, isAutoDate]);
+  }, [isGuest, saveFullStateSafe, jobs, archiveFinish, archiveDeleted, branding, pinCode, currentDateText, isAutoDate]);
 
   // Real-Time Multi-Device Synchronization Engine (SSE untuk Express + Polling Hemat Kuota untuk Vercel Serverless)
   useEffect(() => {
@@ -544,9 +585,22 @@ export default function App() {
 
     const applyRemoteData = (data: any, showUpdateToast: boolean, customAction?: string) => {
       if (!data) return;
+      const { effectiveIsAuto, effectiveDate } = resolveEffectiveDate(
+        data.isAutoDate,
+        data.currentDateText,
+        isAutoDate,
+        currentDateText
+      );
+
+      setIsAutoDate(effectiveIsAuto);
+      setCurrentDateText(effectiveDate);
+      try {
+        localStorage.setItem('welding_shop_is_auto_date', String(effectiveIsAuto));
+        localStorage.setItem('welding_shop_date_v3', effectiveDate);
+      } catch {}
+
       if (Array.isArray(data.jobs)) {
-        const activeDate = data.currentDateText || currentDateText;
-        setJobs(recalculateJobsSchedule(data.jobs, activeDate));
+        setJobs(recalculateJobsSchedule(data.jobs, effectiveDate));
         try {
           localStorage.setItem('welding_shop_jobs_v3', JSON.stringify(data.jobs));
         } catch {}
@@ -574,12 +628,6 @@ export default function App() {
         try {
           localStorage.setItem('welding_shop_branding_v3', JSON.stringify(data.branding));
         } catch {}
-      }
-      if (typeof data.isAutoDate === 'boolean') {
-        setIsAutoDate(data.isAutoDate);
-      }
-      if (typeof data.currentDateText === 'string') {
-        setCurrentDateText(data.currentDateText);
       }
       if (showUpdateToast) {
         setToastMessage(
@@ -673,9 +721,22 @@ export default function App() {
 
           const serverData = res.data;
           const isServerAuthoritative = (res.version || 1) > 1;
-          if (Array.isArray(serverData.jobs) && (serverData.jobs.length > 0 || isServerAuthoritative)) {
-            const activeDate = serverData.currentDateText || currentDateText;
-            setJobs(recalculateJobsSchedule(serverData.jobs, activeDate));
+          const { effectiveIsAuto, effectiveDate } = resolveEffectiveDate(
+            serverData.isAutoDate,
+            serverData.currentDateText,
+            isAutoDate,
+            currentDateText
+          );
+
+          setIsAutoDate(effectiveIsAuto);
+          setCurrentDateText(effectiveDate);
+          try {
+            localStorage.setItem('welding_shop_is_auto_date', String(effectiveIsAuto));
+            localStorage.setItem('welding_shop_date_v3', effectiveDate);
+          } catch {}
+
+          if (Array.isArray(serverData.jobs)) {
+            setJobs(recalculateJobsSchedule(serverData.jobs, effectiveDate));
             try {
               localStorage.setItem('welding_shop_jobs_v3', JSON.stringify(serverData.jobs));
             } catch {}
@@ -683,9 +744,13 @@ export default function App() {
           const serverFinish = Array.isArray(serverData.archiveFinish) ? serverData.archiveFinish : [];
           const serverDeleted = Array.isArray(serverData.archiveDeleted) ? serverData.archiveDeleted : [];
 
-          if (isServerAuthoritative) {
+          if (isServerAuthoritative || isGuest) {
             setArchiveFinish(serverFinish);
             setArchiveDeleted(serverDeleted);
+            try {
+              localStorage.setItem('welding_shop_archive_finish', JSON.stringify(serverFinish));
+              localStorage.setItem('welding_shop_archive_deleted', JSON.stringify(serverDeleted));
+            } catch {}
           } else {
             // Gunakan penggabungan cerdas (mergeArchives) hanya jika server masih di state awal (v1)
             setArchiveFinish((prevFinish) => {
@@ -715,12 +780,6 @@ export default function App() {
             try {
               localStorage.setItem('welding_shop_branding_v3', JSON.stringify(serverData.branding));
             } catch {}
-          }
-          if (typeof serverData.isAutoDate === 'boolean') {
-            setIsAutoDate(serverData.isAutoDate);
-          }
-          if (typeof serverData.currentDateText === 'string') {
-            setCurrentDateText(serverData.currentDateText);
           }
         }
       } catch (err) {
@@ -882,22 +941,50 @@ export default function App() {
     [saveFullStateSafe, currentDateText, jobs, archiveFinish, archiveDeleted, branding, pinCode, isAutoDate]
   );
 
-  // Active jobs count: count jobs that are either AKTIF or actual progress < 100
+  // Hitung ringkasan status pekerjaan aktif (I/P & HOLD) dan kesehatan jadwal
   const activeJobsCount = jobs.filter(
-    (j) => j.status?.toUpperCase() === 'AKTIF' || j.progress_actual < 100
+    (j) => j.status?.toUpperCase() !== 'SELESAI' || j.progress_actual < 100
   ).length;
 
   const completedJobsCount = jobs.filter(
     (j) => j.status?.toUpperCase() === 'SELESAI' || j.progress_actual >= 100
   ).length;
 
+  const sidebarSummary = useMemo(() => {
+    let onTrackCount = 0;
+    let delayCount = 0;
+    let holdCount = 0;
+
+    for (const job of jobs) {
+      const evalResult = evaluateJobHealth(job, currentDateText);
+      if (evalResult.health === 'HOLD') {
+        holdCount += 1;
+      } else if (evalResult.health === 'DELAY' || evalResult.health === 'OVERDUE') {
+        delayCount += 1;
+      } else {
+        onTrackCount += 1;
+      }
+    }
+
+    const finishedThisMonthCount = countFinishedThisMonth(archiveFinish, currentDateText);
+
+    return {
+      onTrackCount,
+      delayCount,
+      holdCount,
+      finishedThisMonthCount,
+    };
+  }, [jobs, archiveFinish, currentDateText]);
+
   // Handlers
   const handleOpenUploadModal = (tab: 'company' | 'k3' | 'welding' = 'company') => {
+    if (isGuest) return;
     setImageModalTab(tab);
     setIsImageModalOpen(true);
   };
 
   const handleSaveBranding = (updated: BrandingImages) => {
+    if (isGuest) return;
     setBranding(updated);
     setSyncStatus('saving');
     saveBrandingSafe(updated).then((res) => {
@@ -913,17 +1000,15 @@ export default function App() {
   };
 
   const handleOpenAddJob = () => {
-    requestPinProtectedAction(() => {
-      setJobToEdit(null);
-      setIsJobEditorOpen(true);
-    }, 'Menambah Job Baru');
+    if (isGuest) return;
+    setJobToEdit(null);
+    setIsJobEditorOpen(true);
   };
 
   const handleOpenEditJob = (job: JobItem) => {
-    requestPinProtectedAction(() => {
-      setJobToEdit(job);
-      setIsJobEditorOpen(true);
-    }, `Mengedit Job: ${job.deskripsi}`);
+    if (isGuest) return;
+    setJobToEdit(job);
+    setIsJobEditorOpen(true);
   };
 
   const handleSaveJob = (job: JobItem, updatedRefDate?: string) => {
@@ -965,49 +1050,47 @@ export default function App() {
   };
 
   const handleDeleteJob = (id: number) => {
+    if (isGuest) return;
     const job = jobs.find((j) => j.id === id);
     const desc = job ? job.deskripsi : `Pekerjaan #${id}`;
 
-    requestPinProtectedAction(() => {
-      let updatedDeleted = archiveDeleted;
-      if (job) {
-        const deletedItem: ArchivedJobItem = {
-          ...job,
-          archivedAt: new Date().toISOString(),
-          archiveType: 'DELETED',
-          deleteReason: 'Dihapus dari dashboard',
-        };
-        updatedDeleted = [deletedItem, ...archiveDeleted.filter((a) => a.id !== id)];
-        setArchiveDeleted(updatedDeleted);
+    let updatedDeleted = archiveDeleted;
+    if (job) {
+      const deletedItem: ArchivedJobItem = {
+        ...job,
+        archivedAt: new Date().toISOString(),
+        archiveType: 'DELETED',
+        deleteReason: 'Dihapus dari dashboard',
+      };
+      updatedDeleted = [deletedItem, ...archiveDeleted.filter((a) => a.id !== id)];
+      setArchiveDeleted(updatedDeleted);
+    }
+
+    const updatedJobs = jobs.filter((j) => j.id !== id);
+    setJobs(updatedJobs);
+
+    // Simpan secara ATOMIK dalam 1 transaksi ke server (tidak ada race condition)
+    apiSaveJobDelete(
+      updatedJobs,
+      updatedDeleted,
+      archiveFinish,
+      `Pekerjaan "${desc}" dihapus & dipindahkan ke arsip`
+    ).then((res) => {
+      if (res.success) {
+        if (res.version) serverVersionRef.current = res.version;
+        setSyncStatus('connected');
+      } else {
+        setSyncStatus('offline');
+        setToastMessage(res.message || 'Gagal menghapus data di server.');
       }
+    });
 
-      const updatedJobs = jobs.filter((j) => j.id !== id);
-      setJobs(updatedJobs);
-
-      // Simpan secara ATOMIK dalam 1 transaksi ke server (tidak ada race condition)
-      apiSaveJobDelete(
-        updatedJobs,
-        updatedDeleted,
-        archiveFinish,
-        `Pekerjaan "${desc}" dihapus & dipindahkan ke arsip`
-      ).then((res) => {
-        if (res.success) {
-          if (res.version) serverVersionRef.current = res.version;
-          setSyncStatus('connected');
-        } else {
-          setSyncStatus('offline');
-          setToastMessage(res.message || 'Gagal menghapus data di server.');
-        }
-      });
-
-      setToastMessage(`Pekerjaan "${desc}" dihapus & tersimpan aman di Arsip Dihapus.`);
-    }, `Menghapus Job: ${desc}`);
+    setToastMessage(`Pekerjaan "${desc}" dihapus & tersimpan aman di Arsip Dihapus.`);
   };
 
   const handleRequestFinish = (job: JobItem) => {
-    requestPinProtectedAction(() => {
-      setJobToFinish(job);
-    }, `Menyelesaikan (Finish) Job: ${job.deskripsi}`);
+    if (isGuest) return;
+    setJobToFinish(job);
   };
 
   const handleConfirmFinish = (job: JobItem) => {
@@ -1050,93 +1133,70 @@ export default function App() {
   };
 
   const handleRestoreFromArchive = (item: ArchivedJobItem) => {
-    requestPinProtectedAction(() => {
-      const { archivedAt, archiveType, deleteReason, ...restoredJob } = item;
+    if (isGuest) return;
+    const { archivedAt, archiveType, deleteReason, ...restoredJob } = item;
 
-      let updatedFinish = archiveFinish;
-      let updatedDeleted = archiveDeleted;
+    let updatedFinish = archiveFinish;
+    let updatedDeleted = archiveDeleted;
 
-      if (archiveType === 'FINISH') {
-        updatedFinish = archiveFinish.filter((a) => a.id !== item.id);
-        setArchiveFinish(updatedFinish);
+    if (archiveType === 'FINISH') {
+      updatedFinish = archiveFinish.filter((a) => a.id !== item.id);
+      setArchiveFinish(updatedFinish);
+    } else {
+      updatedDeleted = archiveDeleted.filter((a) => a.id !== item.id);
+      setArchiveDeleted(updatedDeleted);
+    }
+
+    // Tambahkan kembali ke jobs
+    const updatedList = [restoredJob as JobItem, ...jobs.filter((j) => j.id !== item.id)];
+    const recalculated = applyCalculations(updatedList, currentDateText);
+    setJobs(recalculated);
+
+    // Simpan secara ATOMIK dalam 1 transaksi ke server
+    apiSaveJobRestore(
+      recalculated,
+      updatedFinish,
+      updatedDeleted,
+      `Pekerjaan "${item.deskripsi}" dipulihkan ke dashboard`
+    ).then((res) => {
+      if (res.success) {
+        if (res.version) serverVersionRef.current = res.version;
+        setSyncStatus('connected');
       } else {
-        updatedDeleted = archiveDeleted.filter((a) => a.id !== item.id);
-        setArchiveDeleted(updatedDeleted);
+        setSyncStatus('offline');
+        setToastMessage(res.message || 'Gagal memulihkan data di server.');
       }
+    });
 
-      // Tambahkan kembali ke jobs
-      const updatedList = [restoredJob as JobItem, ...jobs.filter((j) => j.id !== item.id)];
-      const recalculated = applyCalculations(updatedList, currentDateText);
-      setJobs(recalculated);
-
-      // Simpan secara ATOMIK dalam 1 transaksi ke server
-      apiSaveJobRestore(
-        recalculated,
-        updatedFinish,
-        updatedDeleted,
-        `Pekerjaan "${item.deskripsi}" dipulihkan ke dashboard`
-      ).then((res) => {
-        if (res.success) {
-          if (res.version) serverVersionRef.current = res.version;
-          setSyncStatus('connected');
-        } else {
-          setSyncStatus('offline');
-          setToastMessage(res.message || 'Gagal memulihkan data di server.');
-        }
-      });
-
-      setToastMessage(`Pekerjaan "${item.deskripsi}" berhasil dipulihkan ke dashboard aktif.`);
-    }, `Memulihkan Pekerjaan: ${item.deskripsi}`);
+    setToastMessage(`Pekerjaan "${item.deskripsi}" berhasil dipulihkan ke dashboard aktif.`);
   };
 
   const handlePermanentDeleteFromArchive = (item: ArchivedJobItem) => {
-    requestPinProtectedAction(() => {
-      let updatedFinish = archiveFinish;
-      let updatedDeleted = archiveDeleted;
+    if (isGuest) return;
+    let updatedFinish = archiveFinish;
+    let updatedDeleted = archiveDeleted;
 
-      if (item.archiveType === 'FINISH') {
-        updatedFinish = archiveFinish.filter((a) => a.id !== item.id);
-        setArchiveFinish(updatedFinish);
-      } else {
-        updatedDeleted = archiveDeleted.filter((a) => a.id !== item.id);
-        setArchiveDeleted(updatedDeleted);
-      }
-      apiSaveArchive(updatedFinish, updatedDeleted, `Pekerjaan "${item.deskripsi}" dihapus permanen`).then((res) => {
-        if (res.success && res.version) {
-          serverVersionRef.current = res.version;
-        } else if (!res.success) {
-          setSyncStatus('offline');
-          setToastMessage(res.message || 'Gagal menghapus permanen di server.');
-        }
-      });
-      setToastMessage(`Pekerjaan "${item.deskripsi}" dihapus permanen dari arsip.`);
-    }, `Menghapus Permanen Pekerjaan: ${item.deskripsi}`);
-  };
-
-  const handleSavePin = (newPin: string) => {
-    setPinCode(newPin);
-    try {
-      localStorage.setItem('welding_shop_pincode', newPin);
-    } catch {}
-    apiSavePin(newPin).then((res) => {
+    if (item.archiveType === 'FINISH') {
+      updatedFinish = archiveFinish.filter((a) => a.id !== item.id);
+      setArchiveFinish(updatedFinish);
+    } else {
+      updatedDeleted = archiveDeleted.filter((a) => a.id !== item.id);
+      setArchiveDeleted(updatedDeleted);
+    }
+    apiSaveArchive(updatedFinish, updatedDeleted, `Pekerjaan "${item.deskripsi}" dihapus permanen`).then((res) => {
       if (res.success && res.version) {
         serverVersionRef.current = res.version;
       } else if (!res.success) {
         setSyncStatus('offline');
-        setToastMessage(res.message || 'Gagal menyimpan PIN baru ke server.');
+        setToastMessage(res.message || 'Gagal menghapus permanen di server.');
       }
     });
-    setToastMessage('PIN Keamanan baru berhasil disimpan & disinkronkan ke server.');
+    setToastMessage(`Pekerjaan "${item.deskripsi}" dihapus permanen dari arsip.`);
   };
 
   const handleOpenArchiveModal = (tab: 'finish' | 'deleted' = 'finish') => {
     setArchiveModalInitialTab(tab);
     setIsArchiveModalOpen(true);
-  };
-
-  const handleOpenPinSettings = () => {
-    setPinPendingAction(null);
-    setIsPinModalOpen(true);
   };
 
   const handleUndoFinish = () => {
@@ -1193,16 +1253,29 @@ export default function App() {
         setConnectedClients(serverRes.clientCount || 1);
         setSyncStatus('connected');
         const sData = serverRes.data;
-        const activeDate = sData.currentDateText || currentDateText;
+        const { effectiveIsAuto, effectiveDate } = resolveEffectiveDate(
+          sData.isAutoDate,
+          sData.currentDateText,
+          isAutoDate,
+          currentDateText
+        );
+
+        setIsAutoDate(effectiveIsAuto);
+        setCurrentDateText(effectiveDate);
+        try {
+          localStorage.setItem('welding_shop_is_auto_date', String(effectiveIsAuto));
+          localStorage.setItem('welding_shop_date_v3', effectiveDate);
+        } catch {}
+
         if (Array.isArray(sData.jobs)) {
-          setJobs(recalculateJobsSchedule(sData.jobs, activeDate));
+          setJobs(recalculateJobsSchedule(sData.jobs, effectiveDate));
         }
 
         const isServerAuthoritative = (serverRes.version || 1) > 1;
         const serverFinish = Array.isArray(sData.archiveFinish) ? sData.archiveFinish : [];
         const serverDeleted = Array.isArray(sData.archiveDeleted) ? sData.archiveDeleted : [];
 
-        if (isServerAuthoritative) {
+        if (isServerAuthoritative || isGuest) {
           setArchiveFinish(serverFinish);
           setArchiveDeleted(serverDeleted);
         } else {
@@ -1231,8 +1304,6 @@ export default function App() {
           } catch {}
         }
         if (sData.branding) setBranding(sData.branding);
-        if (typeof sData.isAutoDate === 'boolean') setIsAutoDate(sData.isAutoDate);
-        if (typeof sData.currentDateText === 'string') setCurrentDateText(sData.currentDateText);
         setToastMessage(
           serverRes.supportsSSE === false
             ? 'Data berhasil disegarkan dari database cloud.'
@@ -1246,7 +1317,7 @@ export default function App() {
         setIsRefreshing(false);
       }, 450);
     }
-  }, [currentDateText]);
+  }, [currentDateText, isAutoDate, isGuest]);
 
   /**
    * PULIHKAN DATA CADANGAN (RESTORE BACKUP):
@@ -1277,10 +1348,11 @@ export default function App() {
   }, [applyCalculations, currentDateText]);
 
   /**
-   * KONFIRMASI RESET DATA KE DEFAULT:
-   * Menyimpan cadangan data saat ini terlebih dahulu, lalu mereset ke 3 pekerjaan awal.
+   * KONFIRMASI RESET / KOSONGKAN DAFTAR PEKERJAAN:
+   * Menyimpan cadangan data saat ini terlebih dahulu, lalu mengosongkan daftar pekerjaan aktif.
    */
   const handleConfirmReset = useCallback(async () => {
+    if (isGuest) return;
     try {
       if (jobs.length > 0) {
         localStorage.setItem('welding_shop_jobs_backup', JSON.stringify(jobs));
@@ -1290,22 +1362,26 @@ export default function App() {
       // ignore
     }
 
-    const ref = '9 September 2026';
+    const ref = getSystemDateFormatted();
+    setIsAutoDate(true);
     setCurrentDateText(ref);
-    const initial = applyCalculations(INITIAL_JOBS, ref);
-    setJobs(initial);
+    setJobs([]);
     try {
-      localStorage.setItem('welding_shop_jobs_v3', JSON.stringify(initial));
+      localStorage.setItem('welding_shop_jobs_v3', JSON.stringify([]));
       localStorage.setItem('welding_shop_date_v3', ref);
+      localStorage.setItem('welding_shop_is_auto_date', 'true');
     } catch {
       // ignore
     }
 
-    await apiResetServer();
+    const res = await apiResetServer();
+    if (res.success && res.version) {
+      serverVersionRef.current = res.version;
+    }
     setToastMessage(
-      'Data direset ke default pabrik dan disinkronkan ke seluruh perangkat. Cadangan tersimpan aman.'
+      'Daftar pekerjaan aktif berhasil dikosongkan dan disinkronkan ke seluruh perangkat.'
     );
-  }, [applyCalculations, jobs]);
+  }, [isGuest, jobs]);
 
   const handleToggleAutoCycle = () => {
     setAutoCycle((prev) => !prev);
@@ -1314,32 +1390,28 @@ export default function App() {
   return (
     <div
       id="welding-shop-tv-dashboard"
-      className="h-screen h-[100dvh] max-h-screen max-h-[100dvh] w-screen max-w-full overflow-hidden bg-[#F8FAFC] flex flex-col font-sans select-none antialiased text-slate-900 relative"
-      style={{
-        fontFamily: "'Inter', sans-serif",
-        fontWeight: 600,
-        letterSpacing: '0.015em',
-      }}
+      className="h-screen h-[100dvh] max-h-screen max-h-[100dvh] w-screen max-w-full overflow-hidden bg-[#EFF3F8] flex flex-col select-none antialiased text-slate-900 relative"
     >
       {/* Toast Notification Floating Banner */}
       {toastMessage && (
         <div
           id="toast-notification-banner"
-          className="absolute top-16 right-4 z-50 flex items-center gap-2.5 bg-[#032F73] text-white px-4 py-2.5 rounded-xl shadow-2xl border border-blue-400/30 animate-in slide-in-from-top-2 duration-200 max-w-lg"
+          className="absolute top-[74px] right-4 z-50 flex items-center gap-2.5 bg-[#032F73] text-white px-4 py-2.5 rounded-xl shadow-[0_12px_32px_-8px_rgba(3,47,115,0.45)] ring-1 ring-white/15 animate-in slide-in-from-top-2 duration-150 max-w-lg"
         >
           <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-          <span className="text-xs font-bold leading-tight flex-1">{toastMessage}</span>
+          <span className="text-xs font-semibold leading-snug flex-1">{toastMessage}</span>
           {lastFinishedJob && (
             <button
               onClick={handleUndoFinish}
-              className="ml-2 text-xs font-black uppercase text-amber-300 hover:text-amber-100 bg-white/15 hover:bg-white/25 px-2.5 py-1 rounded transition-colors whitespace-nowrap"
+              className="ml-2 text-xs font-bold text-[#EA7A2D] hover:text-orange-200 bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-lg transition-colors whitespace-nowrap"
             >
               Urungkan
             </button>
           )}
           <button
             onClick={() => setToastMessage(null)}
-            className="p-1 hover:bg-white/10 rounded text-slate-300 hover:text-white transition-colors ml-1"
+            className="p-1 hover:bg-white/10 rounded-md text-blue-200 hover:text-white transition-colors ml-1"
+            aria-label="Tutup notifikasi"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -1361,13 +1433,12 @@ export default function App() {
         totalJobs={jobs.length}
         companyLogoUrl={branding.companyLogoUrl}
         weldingLogoUrl={branding.weldingLogoUrl}
-        syncStatus={syncStatus}
-        connectedClients={connectedClients}
-        onForceSyncServer={handleForceSyncServer}
         onOpenArchiveModal={handleOpenArchiveModal}
-        onOpenPinSettings={handleOpenPinSettings}
         archiveFinishCount={archiveFinish.length}
         archiveDeletedCount={archiveDeleted.length}
+        userEmail={user?.email}
+        isReadOnly={isGuest}
+        onSignOut={signOut}
       />
 
       {/* Body: Sidebar Kiri (Panel Informasi & K3) + Area Konten Utama (Tabel Jobs) */}
@@ -1377,30 +1448,38 @@ export default function App() {
           activeJobsCount={activeJobsCount}
           completedJobsCount={completedJobsCount}
           totalJobsCount={jobs.length}
+          onTrackCount={sidebarSummary.onTrackCount}
+          delayCount={sidebarSummary.delayCount}
+          holdCount={sidebarSummary.holdCount}
+          finishedThisMonthCount={sidebarSummary.finishedThisMonthCount}
           currentDateText={currentDateText}
           isAutoDate={isAutoDate}
-          onUpdateDateText={handleUpdateDate}
-          onResetToAutoDate={handleResetToAutoDate}
+          onUpdateDateText={isGuest ? undefined : handleUpdateDate}
+          onResetToAutoDate={isGuest ? undefined : handleResetToAutoDate}
           customK3PosterUrl={branding.k3PosterUrl}
           useCustomK3Image={branding.useCustomK3Image}
-          onOpenUploadModal={handleOpenUploadModal}
+          onOpenUploadModal={isGuest ? undefined : handleOpenUploadModal}
+          isReadOnly={isGuest}
         />
 
         {/* C. Area Konten Utama (Tabel Jobs & Schedule) */}
         <JobsTable
           jobs={jobs}
+          currentDateText={currentDateText}
+          sortMode={sortMode}
+          onChangeSortMode={handleChangeSortMode}
           autoCycle={autoCycle}
           onToggleAutoCycle={handleToggleAutoCycle}
-          onEditJob={handleOpenEditJob}
-          onDeleteJob={handleDeleteJob}
-          onFinishJob={handleRequestFinish}
+          onEditJob={isGuest ? undefined : handleOpenEditJob}
+          onDeleteJob={isGuest ? undefined : handleDeleteJob}
+          onFinishJob={isGuest ? undefined : handleRequestFinish}
           itemsPerPage={7}
         />
       </main>
 
       {/* Modals for SheetJS Excel, Job Management, Image Customization, and Reset Confirmation */}
       <ExcelManagerModal
-        isOpen={isExcelModalOpen}
+        isOpen={!isGuest && isExcelModalOpen}
         onClose={() => setIsExcelModalOpen(false)}
         currentJobs={jobs}
         onImportJobs={handleImportJobs}
@@ -1413,7 +1492,7 @@ export default function App() {
       />
 
       <JobEditorModal
-        isOpen={isJobEditorOpen}
+        isOpen={!isGuest && isJobEditorOpen}
         onClose={() => setIsJobEditorOpen(false)}
         jobToEdit={jobToEdit}
         onSaveJob={handleSaveJob}
@@ -1422,7 +1501,7 @@ export default function App() {
       />
 
       <ImageUploadModal
-        isOpen={isImageModalOpen}
+        isOpen={!isGuest && isImageModalOpen}
         onClose={() => setIsImageModalOpen(false)}
         branding={branding}
         onSaveBranding={handleSaveBranding}
@@ -1430,31 +1509,17 @@ export default function App() {
       />
 
       <ResetConfirmModal
-        isOpen={isResetConfirmOpen}
+        isOpen={!isGuest && isResetConfirmOpen}
         onClose={() => setIsResetConfirmOpen(false)}
         onConfirmReset={handleConfirmReset}
         currentJobsCount={jobs.length}
       />
 
       <FinishConfirmModal
-        isOpen={!!jobToFinish}
+        isOpen={!isGuest && !!jobToFinish}
         onClose={() => setJobToFinish(null)}
         job={jobToFinish}
         onConfirmFinish={handleConfirmFinish}
-      />
-
-      {/* Modal PIN Keamanan (Proteksi Tambah, Edit, Hapus, Pulihkan) */}
-      <PinModal
-        isOpen={isPinModalOpen}
-        onClose={() => {
-          setIsPinModalOpen(false);
-          setPinPendingAction(null);
-        }}
-        onSuccess={handlePinSuccess}
-        currentPin={pinCode}
-        actionDescription={pinPendingAction?.description || 'Pengaturan PIN Keamanan'}
-        onChangePin={handleSavePin}
-        onSessionAuthToggle={handleSessionAuthToggle}
       />
 
       {/* Modal Arsip Data (Selesai dan Dihapus dipisahkan) */}
@@ -1466,6 +1531,7 @@ export default function App() {
         onRestoreJob={handleRestoreFromArchive}
         onPermanentDeleteJob={handlePermanentDeleteFromArchive}
         initialTab={archiveModalInitialTab}
+        isReadOnly={isGuest}
       />
     </div>
   );

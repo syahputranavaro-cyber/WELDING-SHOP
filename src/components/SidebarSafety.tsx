@@ -7,6 +7,10 @@ interface SidebarSafetyProps {
   activeJobsCount: number;
   completedJobsCount?: number;
   totalJobsCount: number;
+  onTrackCount?: number;
+  delayCount?: number;
+  holdCount?: number;
+  finishedThisMonthCount?: number;
   currentDateText: string;
   isAutoDate?: boolean;
   onUpdateDateText?: (date: string, isManual?: boolean) => void;
@@ -14,10 +18,15 @@ interface SidebarSafetyProps {
   customK3PosterUrl?: string | null;
   useCustomK3Image?: boolean;
   onOpenUploadModal?: (tab?: 'company' | 'k3' | 'welding') => void;
+  isReadOnly?: boolean;
 }
 
 export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
   activeJobsCount,
+  onTrackCount = 0,
+  delayCount = 0,
+  holdCount = 0,
+  finishedThisMonthCount = 0,
   currentDateText,
   isAutoDate = true,
   onUpdateDateText,
@@ -25,11 +34,13 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
   customK3PosterUrl,
   useCustomK3Image = false,
   onOpenUploadModal,
+  isReadOnly = false,
 }) => {
   const [isEditingDate, setIsEditingDate] = useState(false);
   const [tempIsoDate, setTempIsoDate] = useState(() => formatToISO(currentDateText));
 
   const handleOpenEdit = () => {
+    if (isReadOnly) return;
     setTempIsoDate(formatToISO(currentDateText));
     setIsEditingDate(true);
   };
@@ -55,68 +66,55 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
   return (
     <aside
       id="dashboard-sidebar-safety"
-      className="w-[220px] min-w-[220px] max-w-[220px] flex-shrink-0 flex flex-col gap-2 p-2 select-none h-full overflow-hidden bg-transparent"
+      className="w-[228px] min-w-[228px] max-w-[228px] flex-shrink-0 flex flex-col gap-2.5 p-2.5 pr-1.5 select-none h-full overflow-hidden bg-transparent"
     >
-      {/* KOTAK 1 (TANGGAL): Card Orange (#EA7A2D) dengan teks putih bold */}
+      {/* KOTAK 1 (TANGGAL): Corporate Orange #EA7A2D */}
       <div
         id="card-sidebar-tanggal"
-        className="w-full rounded-xl bg-[#EA7A2D] shadow-xs border-2 border-orange-400 p-2 flex flex-col items-center justify-center text-center text-white relative group flex-shrink-0"
+        className="w-full rounded-xl bg-gradient-to-br from-[#EA7A2D] to-[#DC6A1D] shadow-[0_4px_14px_-4px_rgba(234,122,45,0.45)] ring-1 ring-inset ring-white/15 px-3 py-2.5 flex flex-col items-center justify-center text-center text-white relative group flex-shrink-0"
       >
-        <div className="w-full flex items-center justify-between px-0.5 mb-1">
-          <div className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-orange-100">
-            <Calendar className="w-3.5 h-3.5 text-white" />
-            <span>HARI INI</span>
+        <div className="w-full flex items-center justify-between mb-1">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold tracking-wider uppercase text-white/85">
+            <Calendar className="w-3.5 h-3.5 text-white/90" />
+            <span>Hari Ini</span>
           </div>
 
-          {/* Status Badge: Otomatis vs Simulasi */}
-          {isAutoDate ? (
-            <span
-              className="inline-flex items-center gap-1 bg-emerald-700/90 border border-emerald-300/80 text-white text-[9px] font-black px-1.5 py-0.2 rounded shadow-2xs"
-              title="Otomatis mengikuti tanggal real-time sistem komputer"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-200 animate-pulse" />
-              <span>Otomatis</span>
-            </span>
-          ) : (
-            <span
-              className="inline-flex items-center gap-1 bg-amber-950/90 border border-amber-300/80 text-yellow-300 text-[9px] font-black px-1.5 py-0.2 rounded shadow-2xs"
-              title="Mode simulasi manual aktif"
-            >
-              <span>Simulasi</span>
-            </span>
-          )}
+          <span
+            className="text-[10px] font-semibold tracking-wide text-white/90"
+            title={
+              isAutoDate
+                ? 'Otomatis mengikuti tanggal real-time sistem komputer'
+                : 'Mode simulasi manual aktif'
+            }
+          >
+            {isAutoDate ? 'Otomatis' : 'Simulasi'}
+          </span>
         </div>
 
         {isEditingDate ? (
           <form onSubmit={handleDateSubmit} className="w-full flex flex-col gap-1.5 mt-0.5">
-            <div className="text-[10px] text-orange-100 font-semibold text-center">
-              Pilih Tanggal Simulasi:
+            <div className="text-[11px] text-white/90 font-medium text-center">
+              Pilih Tanggal Simulasi
             </div>
             <input
               type="date"
               value={tempIsoDate}
               onChange={(e) => setTempIsoDate(e.target.value)}
-              className="w-full text-center bg-white text-slate-900 font-bold px-2 py-1 rounded text-xs focus:outline-none font-inter tabular-nums"
-              style={{
-                fontFamily: "'Inter', sans-serif",
-                fontWeight: 600,
-                letterSpacing: '0.015em',
-                fontVariantNumeric: 'tabular-nums',
-              }}
+              className="w-full text-center bg-white text-slate-900 font-semibold px-2 py-1.5 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#032F73]/30 font-mono-data tabular-nums"
               autoFocus
             />
             <div className="flex flex-wrap gap-1 justify-center mt-0.5">
               <button
                 type="submit"
-                className="bg-[#032F73] hover:bg-blue-900 text-white text-[10px] font-black px-2 py-1 rounded shadow-xs transition-colors"
+                className="bg-[#032F73] hover:bg-[#022154] text-white text-[11px] font-semibold px-2.5 py-1 rounded-md transition-colors inline-flex items-center gap-1"
                 title="Terapkan tanggal simulasi"
               >
-                <Check className="w-3 h-3 inline mr-0.5" /> Terapkan
+                <Check className="w-3 h-3" /> Terapkan
               </button>
               <button
                 type="button"
                 onClick={handleSetToday}
-                className="bg-emerald-800 hover:bg-emerald-700 text-white text-[10px] font-bold px-2 py-1 rounded shadow-xs transition-colors"
+                className="bg-white/20 hover:bg-white/30 text-white text-[11px] font-semibold px-2 py-1 rounded-md transition-colors"
                 title="Gunakan tanggal sistem hari ini secara otomatis"
               >
                 Otomatis
@@ -124,7 +122,7 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
               <button
                 type="button"
                 onClick={() => setIsEditingDate(false)}
-                className="bg-white/20 hover:bg-white/30 text-white text-[10px] font-bold px-2 py-1 rounded transition-colors"
+                className="bg-black/15 hover:bg-black/25 text-white text-[11px] font-medium px-2 py-1 rounded-md transition-colors"
               >
                 Batal
               </button>
@@ -133,121 +131,157 @@ export const SidebarSafety: React.FC<SidebarSafetyProps> = ({
         ) : (
           <div className="w-full flex flex-col items-center">
             <div
-              onClick={handleOpenEdit}
-              title="Klik untuk ubah/simulasi tanggal referensi"
-              className="cursor-pointer group flex items-center justify-center gap-1.5 w-full py-0.5"
+              onClick={isReadOnly ? undefined : handleOpenEdit}
+              title={isReadOnly ? undefined : 'Klik untuk ubah atau simulasi tanggal referensi'}
+              className={`${
+                isReadOnly ? 'cursor-default' : 'cursor-pointer'
+              } group flex items-center justify-center gap-1.5 w-full py-0.5`}
             >
               <span
-                className="text-base lg:text-lg font-bold tracking-tight text-white font-inter tabular-nums drop-shadow-sm group-hover:text-yellow-100 transition-colors"
-                style={{
-                  fontFamily: "'Inter', sans-serif",
-                  fontWeight: 600,
-                  letterSpacing: '0.015em',
-                  fontVariantNumeric: 'tabular-nums',
-                }}
+                className={`text-[17px] lg:text-[18px] font-extrabold tracking-tight text-white tabular-nums leading-snug ${
+                  isReadOnly ? '' : 'group-hover:text-orange-50'
+                } transition-colors`}
               >
                 {currentDateText}
               </span>
-              <Edit2 className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-yellow-200 transition-opacity flex-shrink-0" />
+              {!isReadOnly && (
+                <Edit2 className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-white/90 transition-opacity flex-shrink-0" />
+              )}
             </div>
 
-            {/* Opsi tombol kecil reset jika dalam mode simulasi */}
-            {!isAutoDate && onResetToAutoDate && (
+            {!isReadOnly && !isAutoDate && onResetToAutoDate && (
               <button
                 type="button"
                 onClick={onResetToAutoDate}
                 title="Kembalikan ke tanggal sistem otomatis"
-                className="mt-1 inline-flex items-center gap-1 bg-white/20 hover:bg-white/30 active:scale-95 text-white text-[9.5px] font-bold px-2 py-0.5 rounded shadow-2xs transition-all"
+                className="mt-1.5 inline-flex items-center gap-1 bg-white/20 hover:bg-white/30 text-white text-[10.5px] font-semibold px-2.5 py-0.5 rounded-md transition-colors"
               >
                 <RotateCcw className="w-2.5 h-2.5" />
-                <span>Reset ke Real-time</span>
+                <span>Reset Real-time</span>
               </button>
             )}
           </div>
         )}
       </div>
 
-      {/* KOTAK 2 (JOB AKTIF): Header #032F73 (Dark Navy) & Body Background Putih dengan angka besar */}
+      {/* KOTAK 2 (JOB AKTIF + RINGKASAN MINI): Corporate Navy #032F73 header + crisp white body */}
       <div
         id="card-sidebar-job-aktif"
-        className="w-full rounded-xl overflow-hidden shadow-xs border-2 border-[#032F73] flex flex-col bg-white flex-shrink-0"
+        className="w-full rounded-xl overflow-hidden shadow-[0_2px_10px_-3px_rgba(3,47,115,0.12)] ring-1 ring-slate-200/90 flex flex-col bg-white flex-shrink-0"
       >
-        {/* Header Atas: #032F73 dengan teks JOB AKTIF */}
-        <div className="w-full bg-[#032F73] py-1 px-2 text-center">
-          <h2
-            className="text-white font-bold text-xs lg:text-sm tracking-widest uppercase font-inter"
-            style={{
-              fontFamily: "'Inter', sans-serif",
-              fontWeight: 700,
-              letterSpacing: '0.05em',
-            }}
-          >
-            JOB AKTIF
+        <div className="w-full bg-[#032F73] py-1.5 px-3 text-center">
+          <h2 className="text-white font-bold text-xs tracking-[0.12em] uppercase">
+            Job Aktif
           </h2>
         </div>
 
-        {/* Body Bawah: Background Putih dengan angka jumlah job aktif berukuran besar (Oswald 800) */}
-        <div className="w-full bg-white py-1.5 flex items-center justify-center">
-          <span
-            className="text-5xl lg:text-6xl text-[#032F73] font-oswald tabular-nums leading-none drop-shadow-xs"
-            style={{
-              fontFamily: "'Oswald', sans-serif",
-              fontWeight: 800,
-              fontVariantNumeric: 'tabular-nums',
-            }}
-          >
+        <div className="w-full bg-white py-2 flex items-center justify-center">
+          <span className="text-5xl lg:text-[52px] text-[#032F73] font-oswald font-bold tabular-nums leading-none">
             {activeJobsCount}
           </span>
         </div>
+
+        {/* Ringkasan Mini: On Track / Delay / Selesai Bulan Ini */}
+        <div
+          id="sidebar-mini-summary"
+          className="grid grid-cols-3 border-t border-slate-100 bg-[#F8FAFC] divide-x divide-slate-200/75 text-center"
+        >
+          <div className="py-1.5 px-1 flex flex-col items-center" title="Pekerjaan I/P sesuai atau melampaui target">
+            <span className="text-sm font-bold text-emerald-700 font-mono-data tabular-nums leading-tight">
+              {onTrackCount}
+            </span>
+            <span className="text-[9.5px] font-semibold text-slate-500 leading-tight mt-0.5 whitespace-nowrap">
+              On Track
+            </span>
+          </div>
+
+          <div className="py-1.5 px-1 flex flex-col items-center" title="Pekerjaan I/P tertinggal atau melewati deadline">
+            <span
+              className={`text-sm font-bold font-mono-data tabular-nums leading-tight ${
+                delayCount > 0 ? 'text-rose-600' : 'text-slate-400'
+              }`}
+            >
+              {delayCount}
+            </span>
+            <span className="text-[9.5px] font-semibold text-slate-500 leading-tight mt-0.5 whitespace-nowrap">
+              Delay
+            </span>
+          </div>
+
+          <div className="py-1.5 px-1 flex flex-col items-center" title="Pekerjaan selesai (Finish) bulan ini">
+            <span className="text-sm font-bold text-[#032F73] font-mono-data tabular-nums leading-tight">
+              {finishedThisMonthCount}
+            </span>
+            <span className="text-[9.5px] font-semibold text-slate-500 leading-tight mt-0.5 whitespace-nowrap">
+              Selesai Bln
+            </span>
+          </div>
+        </div>
+
+        {holdCount > 0 && (
+          <div className="border-t border-amber-100 bg-amber-50/70 px-3 py-1 flex items-center justify-between text-[10.5px]">
+            <span className="font-semibold text-amber-800">Status HOLD</span>
+            <span className="font-bold font-mono-data text-amber-800 tabular-nums">
+              {holdCount} Job
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* PANEL GAMBAR K3 / SAFETY (Vertikal - Background #032F73 Dark Navy Blue) */}
+      {/* PANEL GAMBAR K3 / SAFETY (Corporate Navy #032F73) */}
       <div
         id="panel-k3-safety-vertical"
-        className="flex-1 min-h-0 w-full rounded-xl bg-[#032F73] border-2 border-blue-950 p-1 shadow-xs flex flex-col justify-center items-center overflow-hidden relative group"
+        className="flex-1 min-h-0 w-full rounded-xl bg-[#032F73] ring-1 ring-inset ring-white/10 p-1.5 shadow-[0_4px_14px_-4px_rgba(3,47,115,0.3)] flex flex-col justify-center items-center overflow-hidden relative group"
       >
-        {/* Tombol Perintah Ganti / Upload Gambar K3 yang Selalu Tersedia */}
-        {onOpenUploadModal && (
+        {!isReadOnly && onOpenUploadModal && (
           <button
             onClick={() => onOpenUploadModal('k3')}
             title="Upload / Ganti Gambar K3"
-            className="absolute top-2 right-2 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#032F73]/90 hover:bg-[#EA7A2D] text-white border border-white/40 shadow-md backdrop-blur-xs transition-all hover:scale-105 active:scale-95"
+            className="absolute top-2 right-2 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900/65 hover:bg-[#EA7A2D] text-white ring-1 ring-white/25 backdrop-blur-xs opacity-85 group-hover:opacity-100 transition-all"
           >
-            <Camera className="w-3.5 h-3.5 text-yellow-300" />
-            <span className="text-[10px] font-bold uppercase tracking-wider font-inter">Ganti Gambar</span>
+            <Camera className="w-3.5 h-3.5 text-orange-300 group-hover:text-white" />
+            <span className="text-[10.5px] font-semibold">Ganti</span>
           </button>
         )}
 
-        {/* Konten Gambar K3 Diperbesar Maksimal */}
         {customK3PosterUrl && useCustomK3Image ? (
           <div
-            onClick={() => onOpenUploadModal && onOpenUploadModal('k3')}
-            className="w-full h-full flex-1 flex items-center justify-center p-1 cursor-pointer relative overflow-hidden group/img"
-            title="Klik untuk ganti gambar K3"
+            onClick={!isReadOnly && onOpenUploadModal ? () => onOpenUploadModal('k3') : undefined}
+            className={`w-full h-full flex-1 flex items-center justify-center p-0.5 ${
+              isReadOnly ? 'cursor-default' : 'cursor-pointer'
+            } relative overflow-hidden group/img`}
+            title={isReadOnly ? undefined : 'Klik untuk ganti gambar K3'}
           >
             <img
               src={customK3PosterUrl}
-              alt="Gambar K3"
-              className="w-full h-full object-contain rounded-lg shadow-sm transition-transform duration-200 group-hover/img:scale-[1.02]"
+              alt="Poster K3 Welding Shop"
+              referrerPolicy="no-referrer"
+              className={`w-full h-full object-contain rounded-lg ${
+                isReadOnly ? '' : 'transition-transform duration-200 group-hover/img:scale-[1.015]'
+              }`}
             />
-            {/* Hover overlay hint */}
-            <div className="absolute inset-0 bg-[#032F73]/70 opacity-0 group-hover/img:opacity-100 flex flex-col items-center justify-center text-white text-xs font-bold gap-1.5 rounded-lg transition-opacity pointer-events-none">
-              <ImageIcon className="w-6 h-6 text-yellow-300" />
-              <span className="font-inter font-bold uppercase tracking-wider text-[11px]">Klik untuk Ganti Gambar</span>
-            </div>
+            {!isReadOnly && (
+              <div className="absolute inset-0 bg-[#032F73]/75 opacity-0 group-hover/img:opacity-100 flex flex-col items-center justify-center text-white text-xs font-semibold gap-1.5 rounded-lg transition-opacity pointer-events-none">
+                <ImageIcon className="w-6 h-6 text-[#EA7A2D]" />
+                <span>Ganti Poster K3</span>
+              </div>
+            )}
           </div>
         ) : (
           <div
-            onClick={() => onOpenUploadModal && onOpenUploadModal('k3')}
-            className="w-full h-full flex-1 flex flex-col justify-center items-center cursor-pointer relative group/img p-1"
-            title="Klik untuk upload / ganti gambar K3"
+            onClick={!isReadOnly && onOpenUploadModal ? () => onOpenUploadModal('k3') : undefined}
+            className={`w-full h-full flex-1 flex flex-col justify-center items-center ${
+              isReadOnly ? 'cursor-default' : 'cursor-pointer'
+            } relative group/img p-1`}
+            title={isReadOnly ? undefined : 'Klik untuk upload / ganti gambar K3'}
           >
             <K3SafetyIcons />
-            {/* Hover overlay hint */}
-            <div className="absolute inset-0 bg-[#032F73]/70 opacity-0 group-hover/img:opacity-100 flex flex-col items-center justify-center text-white text-xs font-bold gap-1.5 rounded-lg transition-opacity pointer-events-none">
-              <ImageIcon className="w-6 h-6 text-yellow-300" />
-              <span className="font-inter font-bold uppercase tracking-wider text-[11px]">Unggah Poster K3 Asli</span>
-            </div>
+            {!isReadOnly && (
+              <div className="absolute inset-0 bg-[#032F73]/75 opacity-0 group-hover/img:opacity-100 flex flex-col items-center justify-center text-white text-xs font-semibold gap-1.5 rounded-lg transition-opacity pointer-events-none">
+                <ImageIcon className="w-6 h-6 text-[#EA7A2D]" />
+                <span>Unggah Poster K3 Asli</span>
+              </div>
+            )}
           </div>
         )}
       </div>

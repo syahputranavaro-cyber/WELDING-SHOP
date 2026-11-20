@@ -212,7 +212,14 @@ export async function loadStateFromSupabase(): Promise<PersistedServerState | nu
     archiveDeleted,
     pinCode: typeof s?.pin_code === 'string' && s.pin_code ? s.pin_code : '1234',
     branding,
-    currentDateText: s?.current_date_text || '16 September 2026',
+    currentDateText:
+      s?.current_date_text ||
+      new Date().toLocaleDateString('id-ID', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'Asia/Makassar',
+      }),
     isAutoDate: typeof s?.is_auto_date === 'boolean' ? s.is_auto_date : true,
     updatedAt: s?.updated_at || new Date().toISOString(),
   };

@@ -231,3 +231,176 @@ export function calculateJobTarget(
     isOngoing,
   };
 }
+
+export type NormalizedWorkStatus = 'I/P' | 'HOLD';
+export type JobHealthStatus = 'ON_TRACK' | 'DELAY' | 'OVERDUE' | 'HOLD';
+
+export interface JobHealthEvaluation {
+  workStatus: NormalizedWorkStatus;
+  health: JobHealthStatus;
+  deltaPct: number;
+  daysRemaining: number;
+  isOverdue: boolean;
+  label: string;
+}
+
+/**
+ * Normalisasi status kerja: 'HOLD' / 'TERTUNDA' -> 'HOLD', selain itu -> 'I/P' (In Progress)
+ */
+export function normalizeWorkStatus(status?: string | null): NormalizedWorkStatus {
+  const upper = String(status || '').trim().toUpperCase();
+  if (upper === 'HOLD' || upper === 'ON HOLD' || upper === 'TERTUNDA') {
+    return 'HOLD';
+  }
+  return 'I/P';
+}
+
+/**
+ * Evaluasi kesehatan progres pekerjaan secara otomatis (On Track vs Delay vs Overdue vs Hold)
+ */
+export function evaluateJobHealth(
+  job: {
+    start: string;
+    finish: string;
+    progress_target: number;
+    progress_actual: number;
+    status?: string;
+  },
+  referenceInput: string | Date
+): JobHealthEvaluation {
+  const workStatus = normalizeWorkStatus(job.status);
+  const calc = calculateJobTarget(job.start, job.finish, referenceInput);
+  const refDate = parseDate(referenceInput);
+  const finishDate = parseDate(job.finish);
+  const daysRemaining = refDate && finishDate ? diffInDays(refDate, finishDate) : 0;
+
+  const targetPct = Number.isFinite(job.progress_target)
+    ? job.progress_target
+    : calc.targetProgressPct;
+  const actualPct = Number.isFinite(job.progress_actual) ? job.progress_actual : 0;
+  const deltaPct = Number((actualPct - targetPct).toFixed(1));
+  const isOverdue = calc.isAfterFinish && actualPct < 100;
+
+  if (workStatus === 'HOLD') {
+    return {
+      workStatus: 'HOLD',
+      health: 'HOLD',
+      deltaPct,
+      daysRemaining,
+      isOverdue,
+      label: 'HOLD',
+    };
+  }
+
+  if (isOverdue) {
+    return {
+      workStatus: 'I/P',
+      health: 'OVERDUE',
+      deltaPct,
+      daysRemaining,
+      isOverdue: true,
+      label: 'Terlambat',
+    };
+  }
+
+  if (actualPct + 0.01 < targetPct) {
+    return {
+      workStatus: 'I/P',
+      health: 'DELAY',
+      deltaPct,
+      daysRemaining,
+      isOverdue: false,
+      label: 'Delay',
+    };
+  }
+
+  return {
+    workStatus: 'I/P',
+    health: 'ON_TRACK',
+    deltaPct,
+    daysRemaining,
+    isOverdue: false,
+    label: 'On Track',
+  };
+}
+
+/**
+ * Mengurutkan daftar pekerjaan berdasarkan mode:
+ * - 'priority': Overdue -> Delay (selisih terbesar) -> On Track (deadline terdekat) -> HOLD
+ * - 'deadline': Tanggal Finish paling dekat di atas
+ * - 'newest': Urutan asli
+ */
+export function sortJobsByMode<
+  T extends {
+    id: number;
+    start: string;
+    finish: string;
+    progress_target: number;
+    progress_actual: number;
+    status?: string;
+  }
+>(jobs: T[], mode: 'priority' | 'deadline' | 'newest', referenceInput: string | Date): T[] {
+  if (mode === 'newest') return [...jobs];
+
+  const healthRank: Record<JobHealthStatus, number> = {
+    OVERDUE: 0,
+    DELAY: 1,
+    ON_TRACK: 2,
+    HOLD: 3,
+  };
+
+  return [...jobs].sort((a, b) => {
+    const finishA = parseDate(a.finish)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    const finishB = parseDate(b.finish)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+
+    if (mode === 'deadline') {
+      const workA = normalizeWorkStatus(a.status);
+      const workB = normalizeWorkStatus(b.status);
+      if (workA !== workB) return workA === 'HOLD' ? 1 : -1;
+      if (finishA !== finishB) return finishA - finishB;
+      return a.id - b.id;
+    }
+
+    // mode === 'priority'
+    const evalA = evaluateJobHealth(a, referenceInput);
+    const evalB = evaluateJobHealth(b, referenceInput);
+
+    if (healthRank[evalA.health] !== healthRank[evalB.health]) {
+      return healthRank[evalA.health] - healthRank[evalB.health];
+    }
+
+    // Jika keduanya DELAY atau OVERDUE: urutkan dari selisih paling minus lalu deadline terdekat
+    if (evalA.health === 'OVERDUE' || evalA.health === 'DELAY') {
+      if (evalA.deltaPct !== evalB.deltaPct) {
+        return evalA.deltaPct - evalB.deltaPct;
+      }
+    }
+
+    if (finishA !== finishB) return finishA - finishB;
+    return a.id - b.id;
+  });
+}
+
+/**
+ * Menghitung jumlah pekerjaan yang selesai (Finish) pada bulan berjalan
+ */
+export function countFinishedThisMonth(
+  archiveFinish: Array<{ archivedAt?: string }>,
+  referenceInput?: string | Date
+): number {
+  const ref = parseDate(referenceInput) || new Date();
+  const targetYear = ref instanceof Date ? ref.getUTCFullYear() : new Date().getFullYear();
+  const targetMonth = ref instanceof Date ? ref.getUTCMonth() : new Date().getMonth();
+
+  let count = 0;
+  for (const item of archiveFinish) {
+    if (!item?.archivedAt) continue;
+    const d = new Date(item.archivedAt);
+    if (isNaN(d.getTime())) continue;
+    if (d.getFullYear() === targetYear && d.getMonth() === targetMonth) {
+      count += 1;
+    }
+  }
+  return count;
+}
+

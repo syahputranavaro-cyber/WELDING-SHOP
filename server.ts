@@ -9,6 +9,11 @@ import {
   loadStateFromSupabase,
   saveStateToSupabase,
 } from './src/lib/supabaseStore';
+import {
+  verifyAdminCredentials,
+  createAdminToken,
+  verifyAdminAuthHeader,
+} from './src/lib/serverAuth';
 
 interface ServerState {
   version: number;
@@ -27,120 +32,26 @@ interface ServerState {
   updatedAt: string;
 }
 
+function getTodayIndonesian(): string {
+  try {
+    return new Date().toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'Asia/Makassar',
+    });
+  } catch {
+    return new Date().toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+  }
+}
+
 const DEFAULT_STATE: ServerState = {
   version: 1,
-  jobs: [
-    {
-      id: 1,
-      deskripsi: 'Pabrikasi Frame Carry Roller D2822-V Qty 13 Set',
-      area: 'PABRIK 6 BB 1',
-      pic: 'Sadrak AT',
-      start: '15 September 2026',
-      finish: '27 September 2026',
-      progress_target: 15.38,
-      progress_actual: 0.0,
-      status: 'AKTIF',
-    },
-    {
-      id: 2,
-      deskripsi: 'Pabrikasi Frame Carry Roller D2880-V Qty 25 Set',
-      area: 'PABRIK 6 BB 1',
-      pic: 'Agus Adi & ...',
-      start: '15 September 2026',
-      finish: '27 September 2026',
-      progress_target: 15.38,
-      progress_actual: 0.0,
-      status: 'AKTIF',
-    },
-    {
-      id: 3,
-      deskripsi: 'Roll dan Pabrikasi Pipa 16" Karbon D1-TS-402',
-      area: 'PABRIK 3',
-      pic: 'Eka',
-      start: '15 September 2026',
-      finish: '24 September 2026',
-      progress_target: 20.0,
-      progress_actual: 0.0,
-      status: 'AKTIF',
-    },
-    {
-      id: 4,
-      deskripsi: 'Roll & Pabrikasi Pipe 24" Karbon D1-TS-402',
-      area: 'PABRIK 3',
-      pic: 'Amirullah',
-      start: '15 September 2026',
-      finish: '25 September 2026',
-      progress_target: 18.18,
-      progress_actual: 8.0,
-      status: 'AKTIF',
-    },
-    {
-      id: 5,
-      deskripsi: 'Cutting Chain Link Bucket Elevator DL-1103',
-      area: 'PABRIK 7',
-      pic: 'Laser Cutting',
-      start: '14 September 2026',
-      finish: '16 September 2026',
-      progress_target: 100.0,
-      progress_actual: 8.0,
-      status: 'AKTIF',
-    },
-    {
-      id: 6,
-      deskripsi: 'Rebabbit Ring Halft Trust 103-JT QTY 1 EA',
-      area: 'PP&P',
-      pic: 'Abdul R wld',
-      start: '14 September 2026',
-      finish: '15 September 2026',
-      progress_target: 100.0,
-      progress_actual: 50.0,
-      status: 'AKTIF',
-    },
-    {
-      id: 7,
-      deskripsi: 'Supporting Job Perbantuan PPE QTY 4 Orang',
-      area: 'PABRIK 3',
-      pic: 'Muliadi CS',
-      start: '12 September 2026',
-      finish: '2 Oktober 2026',
-      progress_target: 23.81,
-      progress_actual: 14.0,
-      status: 'AKTIF',
-    },
-    {
-      id: 8,
-      deskripsi: 'Repair Support Bak Blank Tank PPE',
-      area: 'PABRIK 2',
-      pic: 'Irwan Musrad',
-      start: '11 September 2026',
-      finish: '16 September 2026',
-      progress_target: 100.0,
-      progress_actual: 85.0,
-      status: 'AKTIF',
-    },
-    {
-      id: 9,
-      deskripsi: 'Pabrikasi Evacuation Ladder Steam Drum & Secondary Reformer Ammonia 1-R-102',
-      area: 'PABRIK 3',
-      pic: 'Purwono',
-      start: '3 September 2026',
-      finish: '16 September 2026',
-      progress_target: 100.0,
-      progress_actual: 100.0,
-      status: 'AKTIF',
-    },
-    {
-      id: 10,
-      deskripsi: 'Supporting Job Perbantuan Operasi ALL Area Ammonia QTY 10 Orang',
-      area: 'PABRIK 3',
-      pic: 'Basir CS',
-      start: '9 September 2026',
-      finish: '29 September 2026',
-      progress_target: 38.1,
-      progress_actual: 28.5,
-      status: 'AKTIF',
-    },
-  ],
+  jobs: [],
   archiveFinish: [],
   archiveDeleted: [],
   pinCode: '1234',
@@ -150,7 +61,7 @@ const DEFAULT_STATE: ServerState = {
     k3PosterUrl: null,
     useCustomK3Image: false,
   },
-  currentDateText: '16 September 2026',
+  currentDateText: getTodayIndonesian(),
   isAutoDate: true,
   updatedAt: new Date().toISOString(),
 };
@@ -190,7 +101,7 @@ async function startServer() {
               ...DEFAULT_STATE,
               ...parsed,
               version: typeof parsed.version === 'number' && parsed.version > 0 ? parsed.version : 1,
-              jobs: Array.isArray(parsed.jobs) && parsed.jobs.length > 0 ? parsed.jobs : DEFAULT_STATE.jobs,
+              jobs: Array.isArray(parsed.jobs) ? parsed.jobs : [],
               archiveFinish: Array.isArray(parsed.archiveFinish) ? parsed.archiveFinish : [],
               archiveDeleted: Array.isArray(parsed.archiveDeleted) ? parsed.archiveDeleted : [],
               pinCode: typeof parsed.pinCode === 'string' && parsed.pinCode ? parsed.pinCode : '1234',
@@ -347,6 +258,50 @@ async function startServer() {
     }
   }
 
+  // === API AUTH ROUTES & WRITE PROTECTION MIDDLEWARE ===
+  const requireAdminAuth: express.RequestHandler = (req, res, next) => {
+    const check = verifyAdminAuthHeader(req.headers.authorization);
+    if (!check.valid) {
+      return res.status(401).json({
+        success: false,
+        message: check.error || 'Akses ditolak. Silakan login sebagai Admin terlebih dahulu.',
+      });
+    }
+    next();
+  };
+
+  app.post('/api/auth/login', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const { email, password } = req.body || {};
+    if (!verifyAdminCredentials(email, password)) {
+      return res.status(401).json({
+        success: false,
+        message: 'Email atau password salah. Silakan periksa kembali.',
+      });
+    }
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const { token, expiresAt } = createAdminToken(normalizedEmail);
+    return res.json({
+      success: true,
+      token,
+      expiresAt,
+      user: {
+        email: normalizedEmail,
+        displayName: 'Admin Welding Shop',
+        role: 'admin',
+      },
+    });
+  });
+
+  app.get('/api/auth/verify', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const check = verifyAdminAuthHeader(req.headers.authorization);
+    if (!check.valid) {
+      return res.status(401).json({ valid: false, message: check.error });
+    }
+    return res.json({ valid: true, email: check.email, role: 'admin' });
+  });
+
   // === API ROUTES ===
   app.get('/api/health', (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
@@ -430,7 +385,7 @@ async function startServer() {
   }, 15000);
 
   // Update spesifik daftar pekerjaan (Jobs)
-  app.post('/api/jobs', async (req, res) => {
+  app.post('/api/jobs', requireAdminAuth, async (req, res) => {
     try {
       const { jobs, actionDescription } = req.body;
       if (!Array.isArray(jobs)) {
@@ -461,7 +416,7 @@ async function startServer() {
   });
 
   // Operasi ATOMIK 1: Selesaikan pekerjaan (Finish) sekaligus arsipkan dalam 1 transaksi
-  app.post('/api/jobs/finish', async (req, res) => {
+  app.post('/api/jobs/finish', requireAdminAuth, async (req, res) => {
     try {
       const { jobs, archiveFinish, archiveDeleted, actionDescription } = req.body;
 
@@ -494,7 +449,7 @@ async function startServer() {
   });
 
   // Operasi ATOMIK 2: Hapus pekerjaan sekaligus pindahkan ke arsip dalam 1 transaksi
-  app.post('/api/jobs/delete', async (req, res) => {
+  app.post('/api/jobs/delete', requireAdminAuth, async (req, res) => {
     try {
       const { jobs, archiveDeleted, archiveFinish, actionDescription } = req.body;
 
@@ -527,7 +482,7 @@ async function startServer() {
   });
 
   // Operasi ATOMIK 3: Pulihkan pekerjaan dari arsip kembali ke dashboard dalam 1 transaksi
-  app.post('/api/jobs/restore', async (req, res) => {
+  app.post('/api/jobs/restore', requireAdminAuth, async (req, res) => {
     try {
       const { jobs, archiveFinish, archiveDeleted, actionDescription } = req.body;
 
@@ -560,7 +515,7 @@ async function startServer() {
   });
 
   // Update branding logo perusahaan, logo welding, dan poster K3
-  app.post('/api/branding', async (req, res) => {
+  app.post('/api/branding', requireAdminAuth, async (req, res) => {
     try {
       const { branding } = req.body;
       if (!branding || typeof branding !== 'object') {
@@ -592,7 +547,7 @@ async function startServer() {
   });
 
   // Update tanggal acuan dashboard
-  app.post('/api/date', async (req, res) => {
+  app.post('/api/date', requireAdminAuth, async (req, res) => {
     try {
       const { currentDateText, isAutoDate } = req.body;
 
@@ -620,7 +575,7 @@ async function startServer() {
   });
 
   // Simpan data lengkap ke server (misal impor file JSON atau sinkronisasi paksa)
-  app.post('/api/state', async (req, res) => {
+  app.post('/api/state', requireAdminAuth, async (req, res) => {
     try {
       const { jobs, archiveFinish, archiveDeleted, pinCode, branding, currentDateText, isAutoDate } = req.body;
 
@@ -662,7 +617,7 @@ async function startServer() {
   });
 
   // Update data arsip (finish dan deleted)
-  app.post('/api/archive', async (req, res) => {
+  app.post('/api/archive', requireAdminAuth, async (req, res) => {
     try {
       const { archiveFinish, archiveDeleted, actionDescription } = req.body;
 
@@ -696,7 +651,7 @@ async function startServer() {
   });
 
   // Update atau verifikasi PIN Keamanan
-  app.post('/api/pin', async (req, res) => {
+  app.post('/api/pin', requireAdminAuth, async (req, res) => {
     try {
       const { pinCode } = req.body;
       if (typeof pinCode !== 'string' || pinCode.trim().length < 4) {
@@ -723,12 +678,12 @@ async function startServer() {
     }
   });
 
-  // Reset data ke default pabrik
-  app.post('/api/reset', async (req, res) => {
+  // Reset data ke default kosong
+  app.post('/api/reset', requireAdminAuth, async (req, res) => {
     try {
       await enqueueWrite(async () => {
         currentState.jobs = DEFAULT_STATE.jobs;
-        currentState.currentDateText = '16 September 2026';
+        currentState.currentDateText = getTodayIndonesian();
         currentState.isAutoDate = true;
         currentState.version += 1;
         currentState.updatedAt = new Date().toISOString();
