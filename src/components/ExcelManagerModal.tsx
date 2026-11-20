@@ -10,7 +10,6 @@ import {
   Check,
   AlertCircle,
   RefreshCw,
-  Database,
   Cloud,
   FileJson,
   ShieldCheck,
@@ -38,7 +37,6 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
   onImportBackupJson,
   onExportBackupJson,
   onForceSaveServer,
-  syncStatus = 'connected',
 }) => {
   const [activeTab, setActiveTab] = useState<'excel' | 'backup'>('backup');
   const [dragOver, setDragOver] = useState(false);
@@ -311,17 +309,17 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
               {activeTab === 'excel' ? (
                 <FileSpreadsheet className="w-6 h-6 text-white" />
               ) : (
-                <Database className="w-6 h-6 text-white" />
+                <FileJson className="w-6 h-6 text-white" />
               )}
             </div>
             <div>
               <h2 className="text-xl font-black text-yellow-400 uppercase tracking-wide">
-                {activeTab === 'excel' ? 'Kelola Data Excel (SheetJS)' : 'Cadangan & Sinkronisasi Server'}
+                {activeTab === 'excel' ? 'Kelola Data Excel (SheetJS)' : 'Cadangan & Sinkronisasi Data'}
               </h2>
               <p className="text-blue-200 text-xs">
                 {activeTab === 'excel'
                   ? 'Import / Export file spreadsheet DASHBOARD WS.xlsx'
-                  : 'Pertahankan semua data & gambar di preview, server cloud, & komputer lain'}
+                  : 'Kelola cadangan lengkap & pemulihan data lintas perangkat'}
               </p>
             </div>
           </div>
@@ -356,8 +354,8 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
                 : 'border-transparent text-blue-300 hover:text-white'
             }`}
           >
-            <Database className="w-4 h-4" />
-            <span>Cadangan Lengkap & Server (.json)</span>
+            <FileJson className="w-4 h-4" />
+            <span>Cadangan Lengkap (.json)</span>
           </button>
         </div>
 
@@ -447,19 +445,19 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
           </>
         )}
 
-        {/* TAB 2: BACKUP LENGKAP & SERVER */}
+        {/* TAB 2: BACKUP LENGKAP */}
         {activeTab === 'backup' && (
           <div className="flex flex-col gap-3">
-            {/* Status Box */}
+            {/* Info Box */}
             <div className="p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-500/80 flex items-start gap-3">
               <ShieldCheck className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
               <div className="text-xs">
                 <div className="font-black text-emerald-300 uppercase tracking-wide">
-                  Perlindungan Data Lintas Komputer & Publish Aktif
+                  Sinkronisasi Lintas Perangkat &amp; Cadangan Portabel
                 </div>
                 <p className="text-emerald-100/90 mt-1 leading-relaxed">
-                  Semua data pekerjaan, logo PT Pupuk Kaltim, logo Welding Shop, dan poster K3 tersimpan otomatis di server backend.
-                  Saat web app ini <strong>di-publish</strong> atau dibuka di <strong>komputer/layar TV yang berbeda</strong>, data akan langsung dimuat secara konsisten.
+                  Semua data pekerjaan, arsip, logo PT Pupuk Kaltim, logo Welding Shop, dan poster K3 tersimpan otomatis secara permanen.
+                  Gunakan fitur cadangan di bawah untuk mengunduh salinan portabel atau memulihkan data dari file cadangan sebelumnya.
                 </p>
               </div>
             </div>
@@ -525,33 +523,23 @@ export const ExcelManagerModal: React.FC<ExcelManagerModalProps> = ({
               </div>
             </div>
 
-            {/* Simpan Paksa ke Server */}
-            <div className="pt-2 border-t border-blue-800 flex items-center justify-between">
-              <div className="text-[11px] text-blue-200 flex items-center gap-1.5">
-                <Database className="w-3.5 h-3.5 text-emerald-400" />
-                <span>
-                  Status server:{' '}
-                  <span className={`font-bold ${syncStatus === 'offline' ? 'text-rose-400' : 'text-emerald-300'}`}>
-                    {syncStatus === 'saving'
-                      ? 'Menyimpan...'
-                      : syncStatus === 'offline'
-                      ? 'Terputus (Offline)'
-                      : 'Aktif & Sinkron (Real-Time)'}
-                  </span>
-                </span>
-              </div>
+            {/* Sinkronisasi Manual */}
+            <div className="pt-2 border-t border-blue-800 flex items-center justify-between gap-2">
+              <span className="text-[11px] text-blue-200">
+                Kirim salinan data &amp; gambar saat ini ke seluruh layar TV yang aktif.
+              </span>
               <button
                 type="button"
                 onClick={() => {
                   if (onForceSaveServer) {
                     onForceSaveServer();
-                    setSuccessMessage('Data & seluruh gambar berhasil dikirim & disimpan di server!');
+                    setSuccessMessage('Data & seluruh gambar berhasil disinkronkan!');
                   }
                 }}
-                className="flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition-colors shadow-xs"
+                className="flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition-colors shadow-xs flex-shrink-0"
               >
                 <Cloud className="w-3.5 h-3.5" />
-                <span>Simpan ke Server Sekarang</span>
+                <span>Sinkronkan Sekarang</span>
               </button>
             </div>
           </div>

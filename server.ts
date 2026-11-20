@@ -1,7 +1,14 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
+import {
+  isSupabaseConfigured,
+  fetchVersionFromSupabase,
+  loadStateFromSupabase,
+  saveStateToSupabase,
+} from './src/lib/supabaseStore';
 
 interface ServerState {
   version: number;
@@ -212,21 +219,95 @@ async function startServer() {
     }
   }
 
-  // Penyimpanan state aman dan atomik ke disk (dengan backup otomatis)
+  // Penyimpanan state aman dan atomik ke disk lokal (sebagai cache/fallback)
   function persistStateSync() {
     try {
       const dataStr = JSON.stringify(currentState, null, 2);
       const tmpFile = `${DATA_FILE}.tmp.${Date.now()}`;
       fs.writeFileSync(tmpFile, dataStr, 'utf-8');
       fs.renameSync(tmpFile, DATA_FILE);
-      // Salin juga ke file backup sebagai proteksi berlapis
       fs.writeFileSync(DATA_BACKUP_FILE, dataStr, 'utf-8');
     } catch (err) {
       console.error('Gagal menyimpan app_state.json secara atomik:', err);
     }
   }
 
-  const persistStateAsync = persistStateSync;
+  // === INTEGRASI SUPABASE (Penyimpanan Cloud Permanen) ===
+  let supabaseHydrated = false;
+  let lastSupabaseCheckAt = 0;
+  let writeQueue: Promise<unknown> = Promise.resolve();
+
+  function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
+    const run = writeQueue.then(task, task);
+    writeQueue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  async function hydrateOrRefreshFromSupabase(force = false): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+
+    const now = Date.now();
+    if (!force && supabaseHydrated && now - lastSupabaseCheckAt < 2000) {
+      return;
+    }
+    lastSupabaseCheckAt = now;
+
+    try {
+      if (!supabaseHydrated) {
+        const remote = await loadStateFromSupabase();
+        if (remote) {
+          currentState = remote;
+          persistStateSync();
+          supabaseHydrated = true;
+          console.log(
+            `[Supabase] State berhasil dimuat (v${remote.version}, ${remote.jobs.length} job aktif, ${remote.archiveFinish.length + remote.archiveDeleted.length} arsip)`
+          );
+        }
+        return;
+      }
+
+      const remoteVersion = await fetchVersionFromSupabase();
+      if (remoteVersion && remoteVersion.version > currentState.version) {
+        const remote = await loadStateFromSupabase();
+        if (remote) {
+          currentState = remote;
+          persistStateSync();
+        }
+      }
+    } catch (err) {
+      console.error('[Supabase] Error sinkronisasi baca:', err);
+    }
+  }
+
+  async function commitState(
+    scopes: { jobs?: boolean; archives?: boolean; settings?: boolean } = {
+      jobs: true,
+      archives: true,
+      settings: true,
+    }
+  ): Promise<void> {
+    if (isSupabaseConfigured()) {
+      const remoteVersion = await fetchVersionFromSupabase();
+      if (remoteVersion && remoteVersion.version >= currentState.version) {
+        currentState.version = remoteVersion.version + 1;
+      }
+      await saveStateToSupabase(currentState, scopes);
+      supabaseHydrated = true;
+      lastSupabaseCheckAt = Date.now();
+    }
+    persistStateSync();
+  }
+
+  // Muat state awal dari Supabase saat server menyala
+  if (isSupabaseConfigured()) {
+    console.log('[Supabase] Kredensial Supabase terdeteksi. Memuat data dari database cloud...');
+    await hydrateOrRefreshFromSupabase(true);
+  } else {
+    console.log('[Supabase] SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY belum diatur. Menggunakan cache lokal sementara.');
+  }
 
   // === MULTI-DEVICE REAL-TIME BROADCAST (Server-Sent Events) ===
   const sseClients = new Set<express.Response>();
@@ -273,11 +354,13 @@ async function startServer() {
       time: new Date().toISOString(),
       version: currentState.version,
       connectedClients: sseClients.size,
+      storage: isSupabaseConfigured() ? 'supabase' : 'local',
     });
   });
 
-  // Ambil state lengkap
-  app.get('/api/state', (req, res) => {
+  // Ambil state lengkap (selalu cek versi terbaru dari Supabase jika aktif)
+  app.get('/api/state', async (req, res) => {
+    await hydrateOrRefreshFromSupabase(false);
     res.json({
       success: true,
       version: currentState.version,
@@ -286,8 +369,9 @@ async function startServer() {
     });
   });
 
-  // Cek versi state (sangat ringan untuk fallback polling)
-  app.get('/api/state/version', (req, res) => {
+  // Cek versi state (sangat ringan untuk fallback polling & sinkronisasi lintas instance)
+  app.get('/api/state/version', async (req, res) => {
+    await hydrateOrRefreshFromSupabase(false);
     res.json({
       success: true,
       version: currentState.version,
@@ -297,7 +381,8 @@ async function startServer() {
   });
 
   // Endpoint Server-Sent Events (SSE) untuk sinkronisasi instan antar perangkat
-  app.get('/api/events', (req, res) => {
+  app.get('/api/events', async (req, res) => {
+    await hydrateOrRefreshFromSupabase(false);
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
@@ -338,18 +423,20 @@ async function startServer() {
   }, 15000);
 
   // Update spesifik daftar pekerjaan (Jobs)
-  app.post('/api/jobs', (req, res) => {
+  app.post('/api/jobs', async (req, res) => {
     try {
       const { jobs, actionDescription } = req.body;
       if (!Array.isArray(jobs)) {
         return res.status(400).json({ success: false, message: 'Format data jobs harus berupa array' });
       }
 
-      currentState.jobs = jobs;
-      currentState.version += 1;
-      currentState.updatedAt = new Date().toISOString();
+      await enqueueWrite(async () => {
+        currentState.jobs = jobs;
+        currentState.version += 1;
+        currentState.updatedAt = new Date().toISOString();
+        await commitState({ jobs: true, settings: true });
+      });
 
-      persistStateAsync();
       broadcast('UPDATE_JOBS', actionDescription || 'Pembaruan daftar pekerjaan', {
         jobsCount: jobs.length,
       });
@@ -361,22 +448,26 @@ async function startServer() {
         data: currentState,
       });
     } catch (err: any) {
+      console.error('Error /api/jobs:', err);
       res.status(500).json({ success: false, message: err.message || 'Server error' });
     }
   });
 
   // Operasi ATOMIK 1: Selesaikan pekerjaan (Finish) sekaligus arsipkan dalam 1 transaksi
-  app.post('/api/jobs/finish', (req, res) => {
+  app.post('/api/jobs/finish', async (req, res) => {
     try {
       const { jobs, archiveFinish, archiveDeleted, actionDescription } = req.body;
-      if (Array.isArray(jobs)) currentState.jobs = jobs;
-      if (Array.isArray(archiveFinish)) currentState.archiveFinish = archiveFinish;
-      if (Array.isArray(archiveDeleted)) currentState.archiveDeleted = archiveDeleted;
 
-      currentState.version += 1;
-      currentState.updatedAt = new Date().toISOString();
+      await enqueueWrite(async () => {
+        if (Array.isArray(jobs)) currentState.jobs = jobs;
+        if (Array.isArray(archiveFinish)) currentState.archiveFinish = archiveFinish;
+        if (Array.isArray(archiveDeleted)) currentState.archiveDeleted = archiveDeleted;
 
-      persistStateAsync();
+        currentState.version += 1;
+        currentState.updatedAt = new Date().toISOString();
+        await commitState({ jobs: true, archives: true, settings: true });
+      });
+
       broadcast('UPDATE_FINISH_JOB', actionDescription || 'Pekerjaan selesai & diarsipkan', {
         jobsCount: currentState.jobs.length,
         finishCount: currentState.archiveFinish.length,
@@ -390,22 +481,26 @@ async function startServer() {
         data: currentState,
       });
     } catch (err: any) {
+      console.error('Error /api/jobs/finish:', err);
       res.status(500).json({ success: false, message: err.message || 'Server error' });
     }
   });
 
   // Operasi ATOMIK 2: Hapus pekerjaan sekaligus pindahkan ke arsip dalam 1 transaksi
-  app.post('/api/jobs/delete', (req, res) => {
+  app.post('/api/jobs/delete', async (req, res) => {
     try {
       const { jobs, archiveDeleted, archiveFinish, actionDescription } = req.body;
-      if (Array.isArray(jobs)) currentState.jobs = jobs;
-      if (Array.isArray(archiveDeleted)) currentState.archiveDeleted = archiveDeleted;
-      if (Array.isArray(archiveFinish)) currentState.archiveFinish = archiveFinish;
 
-      currentState.version += 1;
-      currentState.updatedAt = new Date().toISOString();
+      await enqueueWrite(async () => {
+        if (Array.isArray(jobs)) currentState.jobs = jobs;
+        if (Array.isArray(archiveDeleted)) currentState.archiveDeleted = archiveDeleted;
+        if (Array.isArray(archiveFinish)) currentState.archiveFinish = archiveFinish;
 
-      persistStateAsync();
+        currentState.version += 1;
+        currentState.updatedAt = new Date().toISOString();
+        await commitState({ jobs: true, archives: true, settings: true });
+      });
+
       broadcast('UPDATE_DELETE_JOB', actionDescription || 'Pekerjaan dihapus & dipindahkan ke arsip', {
         jobsCount: currentState.jobs.length,
         finishCount: currentState.archiveFinish.length,
@@ -419,22 +514,26 @@ async function startServer() {
         data: currentState,
       });
     } catch (err: any) {
+      console.error('Error /api/jobs/delete:', err);
       res.status(500).json({ success: false, message: err.message || 'Server error' });
     }
   });
 
   // Operasi ATOMIK 3: Pulihkan pekerjaan dari arsip kembali ke dashboard dalam 1 transaksi
-  app.post('/api/jobs/restore', (req, res) => {
+  app.post('/api/jobs/restore', async (req, res) => {
     try {
       const { jobs, archiveFinish, archiveDeleted, actionDescription } = req.body;
-      if (Array.isArray(jobs)) currentState.jobs = jobs;
-      if (Array.isArray(archiveFinish)) currentState.archiveFinish = archiveFinish;
-      if (Array.isArray(archiveDeleted)) currentState.archiveDeleted = archiveDeleted;
 
-      currentState.version += 1;
-      currentState.updatedAt = new Date().toISOString();
+      await enqueueWrite(async () => {
+        if (Array.isArray(jobs)) currentState.jobs = jobs;
+        if (Array.isArray(archiveFinish)) currentState.archiveFinish = archiveFinish;
+        if (Array.isArray(archiveDeleted)) currentState.archiveDeleted = archiveDeleted;
 
-      persistStateAsync();
+        currentState.version += 1;
+        currentState.updatedAt = new Date().toISOString();
+        await commitState({ jobs: true, archives: true, settings: true });
+      });
+
       broadcast('UPDATE_RESTORE_JOB', actionDescription || 'Pekerjaan dipulihkan dari arsip', {
         jobsCount: currentState.jobs.length,
         finishCount: currentState.archiveFinish.length,
@@ -448,26 +547,29 @@ async function startServer() {
         data: currentState,
       });
     } catch (err: any) {
+      console.error('Error /api/jobs/restore:', err);
       res.status(500).json({ success: false, message: err.message || 'Server error' });
     }
   });
 
   // Update branding logo perusahaan, logo welding, dan poster K3
-  app.post('/api/branding', (req, res) => {
+  app.post('/api/branding', async (req, res) => {
     try {
       const { branding } = req.body;
       if (!branding || typeof branding !== 'object') {
         return res.status(400).json({ success: false, message: 'Format data branding tidak valid' });
       }
 
-      currentState.branding = {
-        ...currentState.branding,
-        ...branding,
-      };
-      currentState.version += 1;
-      currentState.updatedAt = new Date().toISOString();
+      await enqueueWrite(async () => {
+        currentState.branding = {
+          ...currentState.branding,
+          ...branding,
+        };
+        currentState.version += 1;
+        currentState.updatedAt = new Date().toISOString();
+        await commitState({ settings: true });
+      });
 
-      persistStateAsync();
       broadcast('UPDATE_BRANDING', 'Pembaruan gambar logo / poster');
 
       res.json({
@@ -477,21 +579,25 @@ async function startServer() {
         data: currentState,
       });
     } catch (err: any) {
+      console.error('Error /api/branding:', err);
       res.status(500).json({ success: false, message: err.message || 'Server error' });
     }
   });
 
   // Update tanggal acuan dashboard
-  app.post('/api/date', (req, res) => {
+  app.post('/api/date', async (req, res) => {
     try {
       const { currentDateText, isAutoDate } = req.body;
-      if (typeof currentDateText === 'string') currentState.currentDateText = currentDateText;
-      if (typeof isAutoDate === 'boolean') currentState.isAutoDate = isAutoDate;
 
-      currentState.version += 1;
-      currentState.updatedAt = new Date().toISOString();
+      await enqueueWrite(async () => {
+        if (typeof currentDateText === 'string') currentState.currentDateText = currentDateText;
+        if (typeof isAutoDate === 'boolean') currentState.isAutoDate = isAutoDate;
 
-      persistStateAsync();
+        currentState.version += 1;
+        currentState.updatedAt = new Date().toISOString();
+        await commitState({ settings: true });
+      });
+
       broadcast('UPDATE_DATE', 'Pembaruan tanggal dashboard');
 
       res.json({
@@ -501,27 +607,30 @@ async function startServer() {
         data: currentState,
       });
     } catch (err: any) {
+      console.error('Error /api/date:', err);
       res.status(500).json({ success: false, message: err.message || 'Server error' });
     }
   });
 
   // Simpan data lengkap ke server (misal impor file JSON atau sinkronisasi paksa)
-  app.post('/api/state', (req, res) => {
+  app.post('/api/state', async (req, res) => {
     try {
       const { jobs, archiveFinish, archiveDeleted, pinCode, branding, currentDateText, isAutoDate } = req.body;
 
-      if (Array.isArray(jobs)) currentState.jobs = jobs;
-      if (Array.isArray(archiveFinish)) currentState.archiveFinish = archiveFinish;
-      if (Array.isArray(archiveDeleted)) currentState.archiveDeleted = archiveDeleted;
-      if (typeof pinCode === 'string' && pinCode) currentState.pinCode = pinCode;
-      if (branding && typeof branding === 'object') currentState.branding = branding;
-      if (typeof currentDateText === 'string') currentState.currentDateText = currentDateText;
-      if (typeof isAutoDate === 'boolean') currentState.isAutoDate = isAutoDate;
+      await enqueueWrite(async () => {
+        if (Array.isArray(jobs)) currentState.jobs = jobs;
+        if (Array.isArray(archiveFinish)) currentState.archiveFinish = archiveFinish;
+        if (Array.isArray(archiveDeleted)) currentState.archiveDeleted = archiveDeleted;
+        if (typeof pinCode === 'string' && pinCode) currentState.pinCode = pinCode;
+        if (branding && typeof branding === 'object') currentState.branding = branding;
+        if (typeof currentDateText === 'string') currentState.currentDateText = currentDateText;
+        if (typeof isAutoDate === 'boolean') currentState.isAutoDate = isAutoDate;
 
-      currentState.version += 1;
-      currentState.updatedAt = new Date().toISOString();
+        currentState.version += 1;
+        currentState.updatedAt = new Date().toISOString();
+        await commitState({ jobs: true, archives: true, settings: true });
+      });
 
-      persistStateAsync();
       broadcast('UPDATE_STATE', 'Pembaruan data lengkap dashboard');
 
       return res.json({
@@ -537,17 +646,19 @@ async function startServer() {
   });
 
   // Update data arsip (finish dan deleted)
-  app.post('/api/archive', (req, res) => {
+  app.post('/api/archive', async (req, res) => {
     try {
       const { archiveFinish, archiveDeleted, actionDescription } = req.body;
 
-      if (Array.isArray(archiveFinish)) currentState.archiveFinish = archiveFinish;
-      if (Array.isArray(archiveDeleted)) currentState.archiveDeleted = archiveDeleted;
+      await enqueueWrite(async () => {
+        if (Array.isArray(archiveFinish)) currentState.archiveFinish = archiveFinish;
+        if (Array.isArray(archiveDeleted)) currentState.archiveDeleted = archiveDeleted;
 
-      currentState.version += 1;
-      currentState.updatedAt = new Date().toISOString();
+        currentState.version += 1;
+        currentState.updatedAt = new Date().toISOString();
+        await commitState({ archives: true, settings: true });
+      });
 
-      persistStateAsync();
       broadcast('UPDATE_ARCHIVE', actionDescription || 'Pembaruan arsip pekerjaan', {
         finishCount: currentState.archiveFinish.length,
         deletedCount: currentState.archiveDeleted.length,
@@ -563,23 +674,26 @@ async function startServer() {
         },
       });
     } catch (err: any) {
+      console.error('Error /api/archive:', err);
       res.status(500).json({ success: false, message: err.message || 'Server error' });
     }
   });
 
   // Update atau verifikasi PIN Keamanan
-  app.post('/api/pin', (req, res) => {
+  app.post('/api/pin', async (req, res) => {
     try {
       const { pinCode } = req.body;
       if (typeof pinCode !== 'string' || pinCode.trim().length < 4) {
         return res.status(400).json({ success: false, message: 'PIN harus berupa minimal 4 digit angka' });
       }
 
-      currentState.pinCode = pinCode.trim();
-      currentState.version += 1;
-      currentState.updatedAt = new Date().toISOString();
+      await enqueueWrite(async () => {
+        currentState.pinCode = pinCode.trim();
+        currentState.version += 1;
+        currentState.updatedAt = new Date().toISOString();
+        await commitState({ settings: true });
+      });
 
-      persistStateAsync();
       broadcast('UPDATE_PIN', 'PIN keamanan diperbarui');
 
       res.json({
@@ -588,20 +702,23 @@ async function startServer() {
         message: 'PIN berhasil diperbarui dan disinkronkan ke seluruh perangkat',
       });
     } catch (err: any) {
+      console.error('Error /api/pin:', err);
       res.status(500).json({ success: false, message: err.message || 'Server error' });
     }
   });
 
   // Reset data ke default pabrik
-  app.post('/api/reset', (req, res) => {
+  app.post('/api/reset', async (req, res) => {
     try {
-      currentState.jobs = DEFAULT_STATE.jobs;
-      currentState.currentDateText = '16 September 2026';
-      currentState.isAutoDate = true;
-      currentState.version += 1;
-      currentState.updatedAt = new Date().toISOString();
+      await enqueueWrite(async () => {
+        currentState.jobs = DEFAULT_STATE.jobs;
+        currentState.currentDateText = '16 September 2026';
+        currentState.isAutoDate = true;
+        currentState.version += 1;
+        currentState.updatedAt = new Date().toISOString();
+        await commitState({ jobs: true, settings: true });
+      });
 
-      persistStateAsync();
       broadcast('RESET', 'Reset data pekerjaan ke default');
 
       res.json({
@@ -611,6 +728,7 @@ async function startServer() {
         data: currentState,
       });
     } catch (err: any) {
+      console.error('Error /api/reset:', err);
       res.status(500).json({ success: false, message: err.message || 'Server error' });
     }
   });

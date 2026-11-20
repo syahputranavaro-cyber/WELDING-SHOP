@@ -473,7 +473,8 @@ export default function App() {
         setSyncStatus('connected');
 
         const serverData = res.data;
-        if (Array.isArray(serverData.jobs) && serverData.jobs.length > 0) {
+        const isServerAuthoritative = (res.version || 1) > 1;
+        if (Array.isArray(serverData.jobs) && (serverData.jobs.length > 0 || isServerAuthoritative)) {
           const activeDate = serverData.currentDateText || currentDateText;
           setJobs(recalculateJobsSchedule(serverData.jobs, activeDate));
           try {
@@ -483,22 +484,27 @@ export default function App() {
         const serverFinish = Array.isArray(serverData.archiveFinish) ? serverData.archiveFinish : [];
         const serverDeleted = Array.isArray(serverData.archiveDeleted) ? serverData.archiveDeleted : [];
 
-        // Gunakan penggabungan cerdas (mergeArchives) agar arsip tidak terhapus jika server baru restart atau kosong
-        setArchiveFinish((prevFinish) => {
-          const merged = mergeArchives(prevFinish, serverFinish);
-          if (merged.length > serverFinish.length) {
-            apiSaveArchive(merged, serverDeleted, 'Sinkronisasi pemulihan arsip dari perangkat');
-          }
-          return merged;
-        });
+        if (isServerAuthoritative) {
+          setArchiveFinish(serverFinish);
+          setArchiveDeleted(serverDeleted);
+        } else {
+          // Gunakan penggabungan cerdas (mergeArchives) hanya jika server masih di state awal (v1)
+          setArchiveFinish((prevFinish) => {
+            const merged = mergeArchives(prevFinish, serverFinish);
+            if (merged.length > serverFinish.length) {
+              apiSaveArchive(merged, serverDeleted, 'Sinkronisasi pemulihan arsip dari perangkat');
+            }
+            return merged;
+          });
 
-        setArchiveDeleted((prevDeleted) => {
-          const merged = mergeArchives(prevDeleted, serverDeleted);
-          if (merged.length > serverDeleted.length) {
-            apiSaveArchive(serverFinish, merged, 'Sinkronisasi pemulihan arsip dari perangkat');
-          }
-          return merged;
-        });
+          setArchiveDeleted((prevDeleted) => {
+            const merged = mergeArchives(prevDeleted, serverDeleted);
+            if (merged.length > serverDeleted.length) {
+              apiSaveArchive(serverFinish, merged, 'Sinkronisasi pemulihan arsip dari perangkat');
+            }
+            return merged;
+          });
+        }
         if (typeof serverData.pinCode === 'string' && serverData.pinCode) {
           setPinCode(serverData.pinCode);
           try {
@@ -561,10 +567,10 @@ export default function App() {
                   } catch {}
                 }
                 if (Array.isArray(data.archiveFinish)) {
-                  setArchiveFinish((prev) => mergeArchives(prev, data.archiveFinish!));
+                  setArchiveFinish(data.archiveFinish);
                 }
                 if (Array.isArray(data.archiveDeleted)) {
-                  setArchiveDeleted((prev) => mergeArchives(prev, data.archiveDeleted!));
+                  setArchiveDeleted(data.archiveDeleted);
                 }
                 if (typeof data.pinCode === 'string' && data.pinCode) {
                   setPinCode(data.pinCode);
@@ -1045,25 +1051,31 @@ export default function App() {
           setJobs(recalculateJobsSchedule(sData.jobs, activeDate));
         }
 
+        const isServerAuthoritative = (serverRes.version || 1) > 1;
         const serverFinish = Array.isArray(sData.archiveFinish) ? sData.archiveFinish : [];
         const serverDeleted = Array.isArray(sData.archiveDeleted) ? sData.archiveDeleted : [];
 
-        // Gunakan penggabungan cerdas: tidak pernah menghapus data arsip lokal jika server kosong
-        setArchiveFinish((prevFinish) => {
-          const merged = mergeArchives(prevFinish, serverFinish);
-          if (merged.length > serverFinish.length) {
-            apiSaveArchive(merged, serverDeleted, 'Sinkronisasi arsip dari cache perangkat');
-          }
-          return merged;
-        });
+        if (isServerAuthoritative) {
+          setArchiveFinish(serverFinish);
+          setArchiveDeleted(serverDeleted);
+        } else {
+          // Gunakan penggabungan cerdas hanya jika server masih di state awal (v1)
+          setArchiveFinish((prevFinish) => {
+            const merged = mergeArchives(prevFinish, serverFinish);
+            if (merged.length > serverFinish.length) {
+              apiSaveArchive(merged, serverDeleted, 'Sinkronisasi arsip dari cache perangkat');
+            }
+            return merged;
+          });
 
-        setArchiveDeleted((prevDeleted) => {
-          const merged = mergeArchives(prevDeleted, serverDeleted);
-          if (merged.length > serverDeleted.length) {
-            apiSaveArchive(serverFinish, merged, 'Sinkronisasi arsip dari cache perangkat');
-          }
-          return merged;
-        });
+          setArchiveDeleted((prevDeleted) => {
+            const merged = mergeArchives(prevDeleted, serverDeleted);
+            if (merged.length > serverDeleted.length) {
+              apiSaveArchive(serverFinish, merged, 'Sinkronisasi arsip dari cache perangkat');
+            }
+            return merged;
+          });
+        }
 
         if (typeof sData.pinCode === 'string' && sData.pinCode) {
           setPinCode(sData.pinCode);

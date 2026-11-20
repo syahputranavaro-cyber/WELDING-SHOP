@@ -11,11 +11,12 @@ import {
   Image as ImageIcon,
   Cloud,
   CheckCircle2,
-  Database,
+  Wifi,
   FolderArchive,
   KeyRound,
   ShieldCheck,
   HardDriveDownload,
+  LogOut,
 } from 'lucide-react';
 
 interface HeaderBannerProps {
@@ -39,6 +40,8 @@ interface HeaderBannerProps {
   onOpenPinSettings?: () => void;
   archiveFinishCount?: number;
   archiveDeletedCount?: number;
+  userEmail?: string | null;
+  onSignOut?: () => void;
 }
 
 export const HeaderBanner: React.FC<HeaderBannerProps> = ({
@@ -61,6 +64,8 @@ export const HeaderBanner: React.FC<HeaderBannerProps> = ({
   onOpenPinSettings,
   archiveFinishCount = 0,
   archiveDeletedCount = 0,
+  userEmail,
+  onSignOut,
 }) => {
   const [currentTime, setCurrentTime] = useState<string>('');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -157,17 +162,17 @@ export const HeaderBanner: React.FC<HeaderBannerProps> = ({
             <span>{currentTime || '--:--:--'}</span>
           </div>
 
-          {/* Indikator Status Sinkronisasi Real-Time Server (Multi-Perangkat) */}
+          {/* Sinkronisasi Multi-Perangkat */}
           <button
             id="btn-server-sync-status"
             type="button"
             onClick={onForceSyncServer}
             title={
               syncStatus === 'saving'
-                ? 'Sedang menyimpan ke server...'
+                ? 'Menyimpan perubahan...'
                 : syncStatus === 'offline'
-                ? 'Koneksi terputus. Klik untuk mencoba menghubungkan kembali.'
-                : `Sinkronisasi server aktif (${connectedClients} perangkat terhubung). Setiap penambahan/edit data langsung muncul di semua perangkat dengan link ini.`
+                ? 'Menghubungkan kembali...'
+                : `Sinkronisasi multi-perangkat aktif (${connectedClients} perangkat). Klik untuk sinkronkan sekarang.`
             }
             className={`hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all ${
               syncStatus === 'saving'
@@ -177,16 +182,15 @@ export const HeaderBanner: React.FC<HeaderBannerProps> = ({
                 : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
             }`}
           >
-            <span
-              className={`w-2 h-2 rounded-full flex-shrink-0 ${
+            <Wifi
+              className={`w-3.5 h-3.5 ${
                 syncStatus === 'saving'
-                  ? 'bg-amber-500 animate-spin'
+                  ? 'text-amber-600 animate-pulse'
                   : syncStatus === 'offline'
-                  ? 'bg-rose-500'
-                  : 'bg-emerald-500 animate-ping'
+                  ? 'text-rose-600'
+                  : 'text-emerald-600'
               }`}
             />
-            <Database className={`w-3.5 h-3.5 ${syncStatus === 'saving' ? 'text-amber-600 animate-spin' : syncStatus === 'offline' ? 'text-rose-600' : 'text-emerald-600'}`} />
             <span className="truncate">
               {syncStatus === 'saving'
                 ? 'Menyimpan...'
@@ -291,6 +295,17 @@ export const HeaderBanner: React.FC<HeaderBannerProps> = ({
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
+
+          {onSignOut && (
+            <button
+              id="btn-sign-out"
+              onClick={onSignOut}
+              title={userEmail ? `Keluar (${userEmail})` : 'Keluar Akun'}
+              className="p-2 rounded-lg bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-300 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
     </header>
